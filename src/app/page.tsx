@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, startTransition } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 type Expense = {
   id: string
@@ -11,39 +11,57 @@ type Expense = {
   created_at: string
 }
 
-console.log("SUPABASE OBJECT:", supabase)
-
 export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
   const [note, setNote] = useState('')
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   async function fetchExpenses() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('expenses')
       .select('*')
       .order('created_at', { ascending: false })
 
-    setExpenses(data || [])
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+
+    setExpenses((data as Expense[]) || [])
   }
 
   async function addExpense() {
-    if (!amount || !category) return
+    if (!amount.trim() || !category.trim()) return
 
-    await supabase.from('expenses').insert([
-      {
-        amount: Number(amount),
-        category,
-        note,
-      },
-    ])
+    const parsed = Number(amount)
+    if (!Number.isFinite(parsed)) {
+      setSaveError('Enter a valid amount.')
+      return
+    }
+
+    setSaveError(null)
+
+    const { error } = await supabase
+      .from('expenses')
+      .insert({
+        amount: parsed,
+        category: category.trim(),
+        note: note.trim(),
+      })
+      .select()
+      .single()
+
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
 
     setAmount('')
     setCategory('')
     setNote('')
-
-    fetchExpenses()
+    await fetchExpenses()
   }
 
   useEffect(() => {
@@ -80,8 +98,15 @@ export default function Home() {
           onChange={(e) => setNote(e.target.value)}
         />
 
+        {saveError ? (
+          <p className="text-sm text-red-600" role="alert">
+            {saveError}
+          </p>
+        ) : null}
+
         <button
-          onClick={addExpense}
+          type="button"
+          onClick={() => void addExpense()}
           className="w-full bg-black text-white p-2 rounded"
         >
           Add Expense
