@@ -62,6 +62,8 @@ export default function Home() {
   const [editAmount, setEditAmount] = useState('')
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editNote, setEditNote] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false)
   async function fetchCategories() {
     const { data, error } = await supabase
       .from('categories')
@@ -209,12 +211,16 @@ export default function Home() {
     setEditAmount('')
     setEditCategoryId('')
     setEditNote('')
+    setEditDate('')
+    setShowEditDatePicker(false)
   }
 
   function selectExpenseForEdit(expense: Expense) {
     setSelectedExpenseId(expense.id)
     setEditAmount(String(expense.amount))
     setEditNote(expense.note ?? '')
+    setEditDate(expense.expense_date)
+    setShowEditDatePicker(false)
     const cat = categories.find((c) => c.name === expense.category)
     setEditCategoryId(cat ? String(cat.id) : '')
   }
@@ -225,6 +231,11 @@ export default function Home() {
     const selected = categories.find((c) => String(c.id) === editCategoryId)
     if (!editAmount.trim() || !selected) {
       setSaveError('Enter an amount and select a category.')
+      return
+    }
+
+    if (!editDate) {
+      setSaveError('Select a date.')
       return
     }
 
@@ -242,6 +253,7 @@ export default function Home() {
         amount: parsed,
         category: selected.name,
         note: editNote.trim(),
+        expense_date: editDate,
       })
       .eq('id', selectedExpenseId)
 
@@ -501,6 +513,7 @@ export default function Home() {
                   <div
                     key={expense.id}
                     className="space-y-2 rounded-xl border p-3"
+                    onClick={() => setShowEditDatePicker(false)}
                   >
                     <input
                       className={inputClass}
@@ -526,28 +539,72 @@ export default function Home() {
                       value={editNote}
                       onChange={(e) => setEditNote(e.target.value)}
                     />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void saveExpense()}
-                        className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void deleteExpense()}
-                        className="rounded bg-red-600 px-3 py-2 text-sm text-white"
-                      >
-                        Delete
-                      </button>
-                      <button
-                        type="button"
-                        onClick={clearSelectedExpense}
-                        className="rounded bg-gray-200 px-3 py-2 text-sm text-gray-900"
-                      >
-                        Back
-                      </button>
+                    <div className="flex items-end justify-between gap-2">
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setShowEditDatePicker((open) => !open)
+                          }}
+                          className="rounded bg-gray-100 p-2 text-gray-900 hover:bg-gray-200"
+                          aria-label="Change expense date"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M8 2v4" />
+                            <path d="M16 2v4" />
+                            <rect width="18" height="18" x="3" y="4" rx="2" />
+                            <path d="M3 10h18" />
+                          </svg>
+                        </button>
+                        {showEditDatePicker ? (
+                          <div
+                            className="absolute bottom-full left-0 mb-2 rounded-lg border bg-white p-2 shadow"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="date"
+                              className="rounded border border-gray-200 bg-white p-2 text-sm text-gray-900"
+                              value={editDate}
+                              onChange={(e) => setEditDate(e.target.value)}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveExpense()}
+                          className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteExpense()}
+                          className="rounded bg-red-600 px-3 py-2 text-sm text-white"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearSelectedExpense}
+                          className="rounded bg-gray-200 px-3 py-2 text-sm text-gray-900"
+                        >
+                          Back
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )
