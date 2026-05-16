@@ -20,6 +20,8 @@ type Category = {
 const inputClass =
   'w-full rounded border border-gray-200 bg-white p-2 text-gray-900 placeholder:text-gray-400'
 
+const narrowInputClass = `max-w-xs ${inputClass}`
+
 export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -30,9 +32,11 @@ export default function Home() {
   const [editingNames, setEditingNames] = useState<Record<number, string>>({})
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showCategories, setShowCategories] = useState(false)
-
-
-  console.log(categories)
+  const [editMode, setEditMode] = useState(false)
+  const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
+  const [editAmount, setEditAmount] = useState('')
+  const [editCategoryId, setEditCategoryId] = useState('')
+  const [editNote, setEditNote] = useState('')
   async function fetchCategories() {
     const { data, error } = await supabase
       .from('categories')
@@ -168,6 +172,80 @@ export default function Home() {
     await fetchCategories()
   }
 
+  function exitEditMode() {
+    setEditMode(false)
+    clearSelectedExpense()
+  }
+
+  function clearSelectedExpense() {
+    setSelectedExpenseId(null)
+    setEditAmount('')
+    setEditCategoryId('')
+    setEditNote('')
+  }
+
+  function selectExpenseForEdit(expense: Expense) {
+    setSelectedExpenseId(expense.id)
+    setEditAmount(String(expense.amount))
+    setEditNote(expense.note ?? '')
+    const cat = categories.find((c) => c.name === expense.category)
+    setEditCategoryId(cat ? String(cat.id) : '')
+  }
+
+  async function saveExpense() {
+    if (!selectedExpenseId) return
+
+    const selected = categories.find((c) => String(c.id) === editCategoryId)
+    if (!editAmount.trim() || !selected) {
+      setSaveError('Enter an amount and select a category.')
+      return
+    }
+
+    const parsed = Number(editAmount)
+    if (!Number.isFinite(parsed)) {
+      setSaveError('Enter a valid amount.')
+      return
+    }
+
+    setSaveError(null)
+
+    const { error } = await supabase
+      .from('expenses')
+      .update({
+        amount: parsed,
+        category: selected.name,
+        note: editNote.trim(),
+      })
+      .eq('id', selectedExpenseId)
+
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+
+    clearSelectedExpense()
+    await fetchExpenses()
+  }
+
+  async function deleteExpense() {
+    if (!selectedExpenseId) return
+
+    setSaveError(null)
+
+    const { error } = await supabase
+      .from('expenses')
+      .delete()
+      .eq('id', selectedExpenseId)
+
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+
+    clearSelectedExpense()
+    await fetchExpenses()
+  }
+
   useEffect(() => {
     startTransition(() => {
       void Promise.all([fetchExpenses(), fetchCategories()])
@@ -178,8 +256,7 @@ export default function Home() {
 
   return (
     <main className="max-w-md mx-auto p-4 space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-3xl font-bold">Finance Tracker</h1>
+      <div className="flex justify-end">
         <button
           type="button"
           onClick={() => setShowCategories((open) => !open)}
@@ -320,23 +397,144 @@ export default function Home() {
         </button>
       </div>
 
-      <div className="text-xl font-semibold">
-        Total: £{total.toFixed(2)}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xl font-semibold">
+          Total: £{total.toFixed(2)}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (editMode) exitEditMode()
+            else setEditMode(true)
+          }}
+          className="rounded-lg p-1.5 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+          aria-label={editMode ? 'Done editing expenses' : 'Edit expenses'}
+        >
+          {editMode ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          )}
+        </button>
       </div>
 
+      {editMode && !selectedExpenseId ? (
+        <p className="text-sm text-gray-500">Select an entry to edit</p>
+      ) : null}
+
       <div className="space-y-2">
-        {expenses.map((expense) => (
-          <div
-            key={expense.id}
-            className="border p-3 rounded-xl"
-          >
-            <div className="font-semibold">£{expense.amount}</div>
+        {expenses.map((expense) => {
+          if (editMode && expense.id === selectedExpenseId) {
+            return (
+              <div
+                key={expense.id}
+                className="max-w-xs space-y-2 rounded-xl border p-3"
+              >
+                <input
+                  className={narrowInputClass}
+                  placeholder="Amount"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                />
+                <select
+                  className={narrowInputClass}
+                  value={editCategoryId}
+                  onChange={(e) => setEditCategoryId(e.target.value)}
+                >
+                  <option value="">Select category</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={narrowInputClass}
+                  placeholder="Note"
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void saveExpense()}
+                    className="rounded bg-black px-3 py-2 text-sm text-white"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void deleteExpense()}
+                    className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelectedExpense}
+                    className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            )
+          }
 
-            <div>{expense.category}</div>
+          const card = (
+            <>
+              <div className="font-semibold">£{expense.amount}</div>
+              <div>{expense.category}</div>
+              <div className="text-sm text-gray-500">{expense.note}</div>
+            </>
+          )
 
-            <div className="text-sm text-gray-500">{expense.note}</div>
-          </div>
-        ))}
+          if (editMode) {
+            return (
+              <button
+                key={expense.id}
+                type="button"
+                onClick={() => selectExpenseForEdit(expense)}
+                className="w-full rounded-xl border p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                {card}
+              </button>
+            )
+          }
+
+          return (
+            <div key={expense.id} className="rounded-xl border p-3">
+              {card}
+            </div>
+          )
+        })}
       </div>
       </>
       )}

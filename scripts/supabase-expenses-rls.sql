@@ -6,6 +6,8 @@ alter table public.expenses enable row level security;
 
 drop policy if exists "expenses_anon_select" on public.expenses;
 drop policy if exists "expenses_anon_insert" on public.expenses;
+drop policy if exists "expenses_anon_update" on public.expenses;
+drop policy if exists "expenses_anon_delete" on public.expenses;
 
 create policy "expenses_anon_select"
   on public.expenses
@@ -18,3 +20,16 @@ create policy "expenses_anon_insert"
   for insert
   to anon, authenticated
   with check (true);
+
+create policy "expenses_anon_update"
+  on public.expenses
+  for update
+  to anon, authenticated
+  using (true)
+  with check (true);
+
+create policy "expenses_anon_delete"
+  on public.expenses
+  for delete
+  to anon, authenticated
+  using (true);
