@@ -18,6 +18,8 @@ type Category = {
   created_at: string
 }
 
+type ExpenseView = 'date' | 'category'
+
 const inputClass =
   'w-full rounded border border-gray-200 bg-white p-2 text-gray-900 placeholder:text-gray-400'
 
@@ -47,6 +49,53 @@ function formatExpenseDate(date: string) {
   return dateFormatter.format(new Date(year, month - 1, day))
 }
 
+function parseExpenseDate(date: string) {
+  const [year, month, day] = date.split('-').map(Number)
+
+  if (!year || !month || !day) {
+    return null
+  }
+
+  return new Date(year, month - 1, day)
+}
+
+function toDateValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+function getWeekStartDateValue(date: string) {
+  const parsed = parseExpenseDate(date)
+
+  if (!parsed) {
+    return date
+  }
+
+  const day = parsed.getDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  parsed.setDate(parsed.getDate() + mondayOffset)
+
+  return toDateValue(parsed)
+}
+
+function formatWeekRange(weekStart: string) {
+  const start = parseExpenseDate(weekStart)
+
+  if (!start) {
+    return weekStart
+  }
+
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+
+  return `${formatExpenseDate(toDateValue(start))} - ${formatExpenseDate(
+    toDateValue(end)
+  )}`
+}
+
 export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -57,6 +106,7 @@ export default function Home() {
   const [editingNames, setEditingNames] = useState<Record<number, string>>({})
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showCategories, setShowCategories] = useState(false)
+  const [expenseView, setExpenseView] = useState<ExpenseView>('date')
   const [editMode, setEditMode] = useState(false)
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
   const [editAmount, setEditAmount] = useState('')
@@ -64,6 +114,9 @@ export default function Home() {
   const [editNote, setEditNote] = useState('')
   const [editDate, setEditDate] = useState('')
   const [showEditDatePicker, setShowEditDatePicker] = useState(false)
+  const [lastDeletedExpense, setLastDeletedExpense] = useState<Expense | null>(
+    null
+  )
   async function fetchCategories() {
     const { data, error } = await supabase
       .from('categories')
@@ -128,6 +181,7 @@ export default function Home() {
       return
     }
 
+    setLastDeletedExpense(null)
     setAmount('')
     setNote('')
     await fetchExpenses()
@@ -262,12 +316,18 @@ export default function Home() {
       return
     }
 
+    setLastDeletedExpense(null)
     clearSelectedExpense()
     await fetchExpenses()
   }
 
   async function deleteExpense() {
     if (!selectedExpenseId) return
+
+    const expenseToDelete = expenses.find(
+      (expense) => expense.id === selectedExpenseId
+    )
+    if (!expenseToDelete) return
 
     setSaveError(null)
 
@@ -281,7 +341,24 @@ export default function Home() {
       return
     }
 
+    setLastDeletedExpense(expenseToDelete)
     clearSelectedExpense()
+    await fetchExpenses()
+  }
+
+  async function undoDeleteExpense() {
+    if (!lastDeletedExpense) return
+
+    setSaveError(null)
+
+    const { error } = await supabase.from('expenses').insert(lastDeletedExpense)
+
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+
+    setLastDeletedExpense(null)
     await fetchExpenses()
   }
 
@@ -304,6 +381,29 @@ export default function Home() {
 
     groups.push({ date: expense.expense_date, items: [expense] })
     return groups
+  }, [])
+  const weeklyCategoryTotals = expenses.reduce<
+    { weekStart: string; categories: { category: string; total: number }[] }[]
+  >((weeks, expense) => {
+    const weekStart = getWeekStartDateValue(expense.expense_date)
+    let week = weeks.find((item) => item.weekStart === weekStart)
+
+    if (!week) {
+      week = { weekStart, categories: [] }
+      weeks.push(week)
+    }
+
+    let category = week.categories.find(
+      (item) => item.category === expense.category
+    )
+
+    if (!category) {
+      category = { category: expense.category, total: 0 }
+      week.categories.push(category)
+    }
+
+    category.total += expense.amount
+    return weeks
   }, [])
 
   return (
@@ -453,20 +553,30 @@ export default function Home() {
         <div className="text-xl font-semibold">
           Total: £{total.toFixed(2)}
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            if (editMode) exitEditMode()
-            else setEditMode(true)
-          }}
-          className="rounded-lg p-1.5 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
-          aria-label={editMode ? 'Done editing expenses' : 'Edit expenses'}
-        >
-          {editMode ? (
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              if (expenseView === 'date') {
+                exitEditMode()
+                setExpenseView('category')
+                return
+              }
+
+              setExpenseView('date')
+            }}
+            className="rounded-lg p-1.5 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+            aria-label={
+              expenseView === 'date'
+                ? 'View expenses by category'
+                : 'View expenses by date'
+            }
+            aria-pressed={expenseView === 'category'}
+          >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
+              width="18"
+              height="18"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -475,171 +585,241 @@ export default function Home() {
               strokeLinejoin="round"
               aria-hidden
             >
-              <path d="M20 6 9 17l-5-5" />
+              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+              <circle cx="12" cy="12" r="3" />
             </svg>
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-          )}
-        </button>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (editMode) {
+                exitEditMode()
+                return
+              }
+
+              setExpenseView('date')
+              setEditMode(true)
+            }}
+            className="rounded-lg p-1.5 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+            aria-label={editMode ? 'Done editing expenses' : 'Edit expenses'}
+          >
+            {editMode ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
 
-      {editMode && !selectedExpenseId ? (
+      {expenseView === 'date' && editMode && !selectedExpenseId ? (
         <p className="text-sm text-gray-500">Select an entry to edit</p>
       ) : null}
 
-      <div className="space-y-4">
-        {groupedExpenses.map((group) => (
-          <section key={group.date} className="space-y-2">
-            <h2 className="text-sm font-semibold text-gray-500">
-              {formatExpenseDate(group.date)}
-            </h2>
-            {group.items.map((expense) => {
-              if (editMode && expense.id === selectedExpenseId) {
-                return (
-                  <div
-                    key={expense.id}
-                    className="space-y-2 rounded-xl border p-3"
-                    onClick={() => setShowEditDatePicker(false)}
-                  >
-                    <input
-                      className={inputClass}
-                      placeholder="Amount"
-                      value={editAmount}
-                      onChange={(e) => setEditAmount(e.target.value)}
-                    />
-                    <select
-                      className={inputClass}
-                      value={editCategoryId}
-                      onChange={(e) => setEditCategoryId(e.target.value)}
+      {lastDeletedExpense ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-900">
+          <span>Expense deleted.</span>
+          <button
+            type="button"
+            onClick={() => void undoDeleteExpense()}
+            className="font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Undo
+          </button>
+        </div>
+      ) : null}
+
+      {expenseView === 'date' ? (
+        <div className="space-y-4">
+          {groupedExpenses.map((group) => (
+            <section key={group.date} className="space-y-2">
+              <h2 className="text-sm font-semibold text-gray-500">
+                {formatExpenseDate(group.date)}
+              </h2>
+              {group.items.map((expense) => {
+                if (editMode && expense.id === selectedExpenseId) {
+                  return (
+                    <div
+                      key={expense.id}
+                      className="space-y-2 rounded-xl border p-3"
+                      onClick={() => setShowEditDatePicker(false)}
                     >
-                      <option value="">Select category</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      className={inputClass}
-                      placeholder="Note"
-                      value={editNote}
-                      onChange={(e) => setEditNote(e.target.value)}
-                    />
-                    <div className="flex items-end justify-between gap-2">
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setShowEditDatePicker((open) => !open)
-                          }}
-                          className="rounded bg-gray-100 p-2 text-gray-900 hover:bg-gray-200"
-                          aria-label="Change expense date"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden
+                      <input
+                        className={inputClass}
+                        placeholder="Amount"
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                      />
+                      <select
+                        className={inputClass}
+                        value={editCategoryId}
+                        onChange={(e) => setEditCategoryId(e.target.value)}
+                      >
+                        <option value="">Select category</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className={inputClass}
+                        placeholder="Note"
+                        value={editNote}
+                        onChange={(e) => setEditNote(e.target.value)}
+                      />
+                      <div className="flex items-end justify-between gap-2">
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setShowEditDatePicker((open) => !open)
+                            }}
+                            className="rounded bg-gray-100 p-2 text-gray-900 hover:bg-gray-200"
+                            aria-label="Change expense date"
                           >
-                            <path d="M8 2v4" />
-                            <path d="M16 2v4" />
-                            <rect width="18" height="18" x="3" y="4" rx="2" />
-                            <path d="M3 10h18" />
-                          </svg>
-                        </button>
-                        {showEditDatePicker ? (
-                          <div
-                            className="absolute bottom-full left-0 mb-2 rounded-lg border bg-white p-2 shadow"
-                            onClick={(e) => e.stopPropagation()}
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden
+                            >
+                              <path d="M8 2v4" />
+                              <path d="M16 2v4" />
+                              <rect width="18" height="18" x="3" y="4" rx="2" />
+                              <path d="M3 10h18" />
+                            </svg>
+                          </button>
+                          {showEditDatePicker ? (
+                            <div
+                              className="absolute bottom-full left-0 mb-2 rounded-lg border bg-white p-2 shadow"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="date"
+                                className="rounded border border-gray-200 bg-white p-2 text-sm text-gray-900"
+                                value={editDate}
+                                onChange={(e) => setEditDate(e.target.value)}
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void saveExpense()}
+                            className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
                           >
-                            <input
-                              type="date"
-                              className="rounded border border-gray-200 bg-white p-2 text-sm text-gray-900"
-                              value={editDate}
-                              onChange={(e) => setEditDate(e.target.value)}
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void saveExpense()}
-                          className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void deleteExpense()}
-                          className="rounded bg-red-600 px-3 py-2 text-sm text-white"
-                        >
-                          Delete
-                        </button>
-                        <button
-                          type="button"
-                          onClick={clearSelectedExpense}
-                          className="rounded bg-gray-200 px-3 py-2 text-sm text-gray-900"
-                        >
-                          Back
-                        </button>
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteExpense()}
+                            className="rounded bg-red-600 px-3 py-2 text-sm text-white"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearSelectedExpense}
+                            className="rounded bg-gray-200 px-3 py-2 text-sm text-gray-900"
+                          >
+                            Back
+                          </button>
+                        </div>
                       </div>
                     </div>
+                  )
+                }
+
+                const card = (
+                  <>
+                    <div className="font-semibold">£{expense.amount}</div>
+                    <div>{expense.category}</div>
+                    <div className="text-sm text-gray-500">{expense.note}</div>
+                  </>
+                )
+
+                if (editMode) {
+                  return (
+                    <button
+                      key={expense.id}
+                      type="button"
+                      onClick={() => selectExpenseForEdit(expense)}
+                      className="w-full rounded-xl border p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-900"
+                    >
+                      {card}
+                    </button>
+                  )
+                }
+
+                return (
+                  <div key={expense.id} className="rounded-xl border p-3">
+                    {card}
                   </div>
                 )
-              }
-
-              const card = (
-                <>
-                  <div className="font-semibold">£{expense.amount}</div>
-                  <div>{expense.category}</div>
-                  <div className="text-sm text-gray-500">{expense.note}</div>
-                </>
-              )
-
-              if (editMode) {
-                return (
-                  <button
-                    key={expense.id}
-                    type="button"
-                    onClick={() => selectExpenseForEdit(expense)}
-                    className="w-full rounded-xl border p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-900"
+              })}
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {weeklyCategoryTotals.map((week) => (
+            <section key={week.weekStart} className="space-y-2">
+              <h2 className="text-sm font-semibold text-gray-500">
+                {formatWeekRange(week.weekStart)}
+              </h2>
+              <div className="space-y-2">
+                {week.categories.map((category) => (
+                  <div
+                    key={category.category}
+                    className="flex items-center justify-between rounded-xl border p-3"
                   >
-                    {card}
-                  </button>
-                )
-              }
-
-              return (
-                <div key={expense.id} className="rounded-xl border p-3">
-                  {card}
-                </div>
-              )
-            })}
-          </section>
-        ))}
-      </div>
+                    <span>{category.category}</span>
+                    <span className="font-semibold">
+                      £{category.total.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
       </>
       )}
     </main>
