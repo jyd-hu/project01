@@ -21,8 +21,6 @@ type Category = {
 const inputClass =
   'w-full rounded border border-gray-200 bg-white p-2 text-gray-900 placeholder:text-gray-400'
 
-const narrowInputClass = `max-w-xs ${inputClass}`
-
 const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
   day: 'numeric',
@@ -502,16 +500,16 @@ export default function Home() {
                 return (
                   <div
                     key={expense.id}
-                    className="max-w-xs space-y-2 rounded-xl border p-3"
+                    className="space-y-2 rounded-xl border p-3"
                   >
                     <input
-                      className={narrowInputClass}
+                      className={inputClass}
                       placeholder="Amount"
                       value={editAmount}
                       onChange={(e) => setEditAmount(e.target.value)}
                     />
                     <select
-                      className={narrowInputClass}
+                      className={inputClass}
                       value={editCategoryId}
                       onChange={(e) => setEditCategoryId(e.target.value)}
                     >
@@ -523,30 +521,30 @@ export default function Home() {
                       ))}
                     </select>
                     <input
-                      className={narrowInputClass}
+                      className={inputClass}
                       placeholder="Note"
                       value={editNote}
                       onChange={(e) => setEditNote(e.target.value)}
                     />
-                    <div className="flex gap-2">
+                    <div className="flex justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => void saveExpense()}
-                        className="rounded bg-black px-3 py-2 text-sm text-white"
+                        className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
                       >
                         Save
                       </button>
                       <button
                         type="button"
                         onClick={() => void deleteExpense()}
-                        className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                        className="rounded bg-red-600 px-3 py-2 text-sm text-white"
                       >
                         Delete
                       </button>
                       <button
                         type="button"
                         onClick={clearSelectedExpense}
-                        className="rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                        className="rounded bg-gray-200 px-3 py-2 text-sm text-gray-900"
                       >
                         Back
                       </button>
