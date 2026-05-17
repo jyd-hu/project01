@@ -1,9 +1,11 @@
 -- Run this in Supabase: SQL Editor → New query → Paste → Run.
--- Allows the browser anon key to SELECT and INSERT on public.expenses.
--- Replace with auth-scoped policies (e.g. auth.uid()) before production.
+-- Adds per-user ownership to public.expenses and restricts access with RLS.
 
 alter table public.expenses
   add column if not exists expense_date date;
+
+alter table public.expenses
+  add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
 update public.expenses
 set expense_date = created_at::date
@@ -19,28 +21,32 @@ drop policy if exists "expenses_anon_select" on public.expenses;
 drop policy if exists "expenses_anon_insert" on public.expenses;
 drop policy if exists "expenses_anon_update" on public.expenses;
 drop policy if exists "expenses_anon_delete" on public.expenses;
+drop policy if exists "expenses_select_own" on public.expenses;
+drop policy if exists "expenses_insert_own" on public.expenses;
+drop policy if exists "expenses_update_own" on public.expenses;
+drop policy if exists "expenses_delete_own" on public.expenses;
 
-create policy "expenses_anon_select"
+create policy "expenses_select_own"
   on public.expenses
   for select
-  to anon, authenticated
-  using (true);
+  to authenticated
+  using (auth.uid() = user_id);
 
-create policy "expenses_anon_insert"
+create policy "expenses_insert_own"
   on public.expenses
   for insert
-  to anon, authenticated
-  with check (true);
+  to authenticated
+  with check (auth.uid() = user_id);
 
-create policy "expenses_anon_update"
+create policy "expenses_update_own"
   on public.expenses
   for update
-  to anon, authenticated
-  using (true)
-  with check (true);
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
-create policy "expenses_anon_delete"
+create policy "expenses_delete_own"
   on public.expenses
   for delete
-  to anon, authenticated
-  using (true);
+  to authenticated
+  using (auth.uid() = user_id);

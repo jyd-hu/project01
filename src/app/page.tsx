@@ -2,10 +2,13 @@
 
 import { useEffect, useState, startTransition } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
 type Expense = {
   id: string
+  user_id: string
   amount: number
   category: string
   note: string
@@ -98,6 +101,10 @@ function formatWeekRange(weekStart: string) {
 }
 
 export default function Home() {
+  const router = useRouter()
+  const [session, setSession] = useState<Session | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [amount, setAmount] = useState('')
@@ -152,6 +159,11 @@ export default function Home() {
   }
 
   async function addExpense() {
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
     const selected = categories.find((c) => String(c.id) === categoryId)
     if (!amount.trim() || !selected) {
       setSaveError('Enter an amount and select a category.')
@@ -173,6 +185,7 @@ export default function Home() {
         category: selected.name,
         note: note.trim(),
         expense_date: getTodayDateValue(),
+        user_id: user.id,
       })
       .select()
       .single()
@@ -348,11 +361,14 @@ export default function Home() {
   }
 
   async function undoDeleteExpense() {
-    if (!lastDeletedExpense) return
+    if (!lastDeletedExpense || !user) return
 
     setSaveError(null)
 
-    const { error } = await supabase.from('expenses').insert(lastDeletedExpense)
+    const { error } = await supabase.from('expenses').insert({
+      ...lastDeletedExpense,
+      user_id: user.id,
+    })
 
     if (error) {
       setSaveError(error.message)
@@ -364,10 +380,77 @@ export default function Home() {
   }
 
   useEffect(() => {
-    startTransition(() => {
-      void Promise.all([fetchExpenses(), fetchCategories()])
+    let mounted = true
+
+    async function loadSession() {
+      const { data, error } = await supabase.auth.getSession()
+
+      if (!mounted) return
+
+      if (error) {
+        setSaveError(error.message)
+        setAuthLoading(false)
+        return
+      }
+
+      if (!data.session) {
+        router.replace('/login')
+        setAuthLoading(false)
+        return
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser()
+
+      if (!mounted) return
+
+      if (userError || !userData.user) {
+        setSaveError(userError?.message ?? 'Unable to load your user account.')
+        setAuthLoading(false)
+        return
+      }
+
+      setSession(data.session)
+      setUser(userData.user)
+      setAuthLoading(false)
+
+      startTransition(() => {
+        void Promise.all([fetchExpenses(), fetchCategories()])
+      })
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return
+
+      setSession(nextSession)
+      setUser(nextSession?.user ?? null)
+
+      if (!nextSession) {
+        router.replace('/login')
+      }
     })
-  }, [])
+
+    void loadSession()
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [router])
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
+
+  if (authLoading || !session) {
+    return (
+      <main className="mx-auto max-w-md p-4">
+        <p className="text-sm text-gray-500">Loading...</p>
+      </main>
+    )
+  }
 
   const total = expenses.reduce((sum, e) => sum + e.amount, 0)
   const groupedExpenses = expenses.reduce<
@@ -437,97 +520,94 @@ export default function Home() {
           type="button"
           onClick={() => setShowCategories((open) => !open)}
           className="rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
-          aria-label={showCategories ? 'Close categories' : 'Manage categories'}
+          aria-label={showCategories ? 'Close settings' : 'Manage settings'}
         >
-          {showCategories ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M3 7V5a2 2 0 0 1 2-2h3.17a2 2 0 0 1 1.41.59l1.83 1.83A2 2 0 0 0 12.83 6H19a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
-            </svg>
-          )}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 3.46l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1 0-3.46l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
         </button>
       </div>
 
       {showCategories ? (
-      <section className="space-y-3 rounded-xl bg-gray-100 p-4 text-gray-900">
-        <h2 className="text-lg font-semibold text-gray-900">Manage categories</h2>
+        <>
+          <section className="space-y-3 rounded-xl bg-gray-100 p-4 text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Manage categories
+            </h2>
 
-        <ul className="space-y-2">
-          {categories.map((c) => (
-            <li key={c.id} className="flex gap-2">
+            <ul className="space-y-2">
+              {categories.map((c) => (
+                <li key={c.id} className="flex gap-2">
+                  <input
+                    className={`${inputClass} flex-1`}
+                    value={editingNames[c.id] ?? c.name}
+                    onChange={(e) =>
+                      setEditingNames((prev) => ({
+                        ...prev,
+                        [c.id]: e.target.value,
+                      }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveCategory(c.id)}
+                    className="shrink-0 rounded bg-black px-3 py-2 text-sm text-white"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void deleteCategory(c.id)}
+                    className="shrink-0 rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex gap-2">
               <input
                 className={`${inputClass} flex-1`}
-                value={editingNames[c.id] ?? c.name}
-                onChange={(e) =>
-                  setEditingNames((prev) => ({
-                    ...prev,
-                    [c.id]: e.target.value,
-                  }))
-                }
+                placeholder="New category"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void addCategory()
+                }}
               />
               <button
                 type="button"
-                onClick={() => void saveCategory(c.id)}
+                onClick={() => void addCategory()}
                 className="shrink-0 rounded bg-black px-3 py-2 text-sm text-white"
               >
-                Save
+                Add
               </button>
-              <button
-                type="button"
-                onClick={() => void deleteCategory(c.id)}
-                className="shrink-0 rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-              >
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
+            </div>
+          </section>
 
-        <div className="flex gap-2">
-          <input
-            className={`${inputClass} flex-1`}
-            placeholder="New category"
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void addCategory()
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => void addCategory()}
-            className="shrink-0 rounded bg-black px-3 py-2 text-sm text-white"
-          >
-            Add
-          </button>
-        </div>
-      </section>
+          <section className="rounded-xl bg-gray-100 p-4">
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 hover:bg-gray-50"
+            >
+              Sign out
+            </button>
+          </section>
+        </>
       ) : (
       <>
       <div className="bg-gray-100 p-4 rounded-xl space-y-2">

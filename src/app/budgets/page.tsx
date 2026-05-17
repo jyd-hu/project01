@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { startTransition, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
@@ -74,6 +75,8 @@ function getMonthProgress(date: Date) {
 }
 
 export default function BudgetsPage() {
+  const router = useRouter()
+  const [authLoading, setAuthLoading] = useState(true)
   const [categories, setCategories] = useState<Category[]>([])
   const [budgetInputs, setBudgetInputs] = useState<Record<number, string>>({})
   const [monthlySpendByCategory, setMonthlySpendByCategory] = useState<
@@ -167,14 +170,58 @@ export default function BudgetsPage() {
   }
 
   useEffect(() => {
-    const todayTimer = window.setTimeout(() => setToday(new Date()), 0)
+    let mounted = true
 
-    startTransition(() => {
-      void Promise.all([fetchCategories(), fetchMonthlyExpenses()])
+    async function loadSession() {
+      const { data, error } = await supabase.auth.getSession()
+
+      if (!mounted) return
+
+      if (error) {
+        setError(error.message)
+        setAuthLoading(false)
+        return
+      }
+
+      if (!data.session) {
+        router.replace('/login')
+        setAuthLoading(false)
+        return
+      }
+
+      setAuthLoading(false)
+      setToday(new Date())
+
+      startTransition(() => {
+        void Promise.all([fetchCategories(), fetchMonthlyExpenses()])
+      })
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return
+
+      if (!session) {
+        router.replace('/login')
+      }
     })
 
-    return () => window.clearTimeout(todayTimer)
-  }, [])
+    void loadSession()
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [router])
+
+  if (authLoading) {
+    return (
+      <main className="mx-auto max-w-md p-4">
+        <p className="text-sm text-gray-500">Loading...</p>
+      </main>
+    )
+  }
 
   const todayLabel = today ? formatTodayDate(today) : 'Today'
   const monthProgress = today ? getMonthProgress(today).toFixed(4) : '0'
