@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, startTransition } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
 type Expense = {
@@ -408,7 +409,30 @@ export default function Home() {
 
   return (
     <main className="max-w-md mx-auto p-4 space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <Link
+          href="/budgets"
+          className="rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+          aria-label="View budgets"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <rect width="18" height="18" x="3" y="3" rx="2" />
+            <path d="M7 7h10" />
+            <path d="M7 12h10" />
+            <path d="M7 17h6" />
+          </svg>
+        </Link>
         <button
           type="button"
           onClick={() => setShowCategories((open) => !open)}

@@ -1,6 +1,9 @@
 -- Run in Supabase SQL Editor after creating public.categories.
 -- Allows the browser anon key to manage categories (dev / solo use).
 
+alter table public.categories
+  add column if not exists monthly_budget numeric not null default 0;
+
 alter table public.categories enable row level security;
 
 drop policy if exists "categories_anon_select" on public.categories;
