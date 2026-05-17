@@ -81,6 +81,7 @@ export default function BudgetsPage() {
   >({})
   const [editMode, setEditMode] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [today, setToday] = useState<Date | null>(null)
 
   async function fetchCategories() {
     const { data, error } = await supabase
@@ -166,14 +167,17 @@ export default function BudgetsPage() {
   }
 
   useEffect(() => {
+    const todayTimer = window.setTimeout(() => setToday(new Date()), 0)
+
     startTransition(() => {
       void Promise.all([fetchCategories(), fetchMonthlyExpenses()])
     })
+
+    return () => window.clearTimeout(todayTimer)
   }, [])
 
-  const today = new Date()
-  const todayLabel = formatTodayDate(today)
-  const monthProgress = getMonthProgress(today)
+  const todayLabel = today ? formatTodayDate(today) : 'Today'
+  const monthProgress = today ? getMonthProgress(today).toFixed(4) : '0'
 
   return (
     <main className="mx-auto max-w-md space-y-4 p-4">
