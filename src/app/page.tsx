@@ -954,10 +954,10 @@ export default function Home() {
 
   return (
     <main className="max-w-md mx-auto p-4 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="grid grid-cols-3 items-center">
         <Link
           href="/budgets"
-          className="rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+          className="justify-self-start rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
           aria-label="View budgets"
         >
           <svg
@@ -978,10 +978,31 @@ export default function Home() {
             <path d="M7 17h6" />
           </svg>
         </Link>
+        <Link
+          href="/analysis"
+          className="justify-self-center rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+          aria-label="View spending analysis"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M3 3v18h18" />
+            <path d="m7 16 4-4 3 3 5-7" />
+          </svg>
+        </Link>
         <button
           type="button"
           onClick={() => setShowCategories((open) => !open)}
-          className="rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+          className="justify-self-end rounded-lg p-2 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
           aria-label={showCategories ? 'Close settings' : 'Manage settings'}
         >
           <svg
