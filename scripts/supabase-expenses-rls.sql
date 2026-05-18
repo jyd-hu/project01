@@ -10,6 +10,15 @@ alter table public.expenses
 alter table public.expenses
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
+alter table public.expenses
+  add column if not exists recurrence_id uuid;
+
+alter table public.expenses
+  add column if not exists recurrence_frequency text not null default 'none';
+
+alter table public.expenses
+  add column if not exists recurrence_start_date date;
+
 update public.expenses
 set expense_date = created_at::date
 where expense_date is null;
@@ -17,6 +26,16 @@ where expense_date is null;
 alter table public.expenses
   alter column expense_date set default current_date,
   alter column expense_date set not null;
+
+alter table public.expenses
+  drop constraint if exists expenses_recurrence_frequency_valid;
+
+alter table public.expenses
+  add constraint expenses_recurrence_frequency_valid
+  check (recurrence_frequency in ('none', 'monthly', 'yearly'));
+
+create index if not exists expenses_user_recurrence_idx
+  on public.expenses (user_id, recurrence_id, expense_date);
 
 alter table public.expenses enable row level security;
 

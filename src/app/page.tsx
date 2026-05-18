@@ -1,6 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState, startTransition } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  startTransition,
+} from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session, User } from '@supabase/supabase-js'
@@ -15,6 +21,9 @@ type Expense = {
   note: string
   created_at: string
   expense_date: string
+  recurrence_id: string | null
+  recurrence_frequency: RecurrenceFrequency
+  recurrence_start_date: string | null
 }
 
 type Category = {
@@ -28,10 +37,16 @@ type Category = {
 
 type ExpenseView = 'date' | 'category'
 type CategoryGroup = 'essential' | 'non_essential'
+type RecurrenceFrequency = 'none' | 'monthly' | 'yearly'
 
 const categoryGroups: { value: CategoryGroup; label: string }[] = [
   { value: 'essential', label: 'Essential' },
   { value: 'non_essential', label: 'Non-essential' },
+]
+const recurrenceOptions: { value: RecurrenceFrequency; label: string }[] = [
+  { value: 'none', label: 'Does not repeat' },
+  { value: 'monthly', label: 'Repeat monthly' },
+  { value: 'yearly', label: 'Repeat yearly' },
 ]
 
 const inputClass =
@@ -79,6 +94,67 @@ function toDateValue(date: Date) {
   const day = String(date.getDate()).padStart(2, '0')
 
   return `${year}-${month}-${day}`
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate()
+}
+
+function addRecurringPeriod(
+  date: string,
+  frequency: Exclude<RecurrenceFrequency, 'none'>,
+  periods: number
+) {
+  const parsed = parseExpenseDate(date)
+
+  if (!parsed) {
+    return date
+  }
+
+  const targetYear =
+    frequency === 'yearly'
+      ? parsed.getFullYear() + periods
+      : parsed.getFullYear() + Math.floor((parsed.getMonth() + periods) / 12)
+  const targetMonth =
+    frequency === 'yearly'
+      ? parsed.getMonth()
+      : ((parsed.getMonth() + periods) % 12 + 12) % 12
+  const targetDay = Math.min(
+    parsed.getDate(),
+    getDaysInMonth(targetYear, targetMonth + 1)
+  )
+
+  return toDateValue(new Date(targetYear, targetMonth, targetDay))
+}
+
+function getRecurringPeriodOffset(
+  fromDate: string,
+  toDate: string,
+  frequency: Exclude<RecurrenceFrequency, 'none'>
+) {
+  const from = parseExpenseDate(fromDate)
+  const to = parseExpenseDate(toDate)
+
+  if (!from || !to) {
+    return 0
+  }
+
+  if (frequency === 'yearly') {
+    return to.getFullYear() - from.getFullYear()
+  }
+
+  return (
+    (to.getFullYear() - from.getFullYear()) * 12 +
+    to.getMonth() -
+    from.getMonth()
+  )
+}
+
+function getExpenseRecurrenceFrequency(expense: Expense): RecurrenceFrequency {
+  return expense.recurrence_frequency === 'monthly' ||
+    expense.recurrence_frequency === 'yearly'
+    ? expense.recurrence_frequency
+    : 'none'
 }
 
 function normalizeCategoryGroup(group: string | null | undefined): CategoryGroup {
@@ -183,6 +259,8 @@ export default function Home() {
   const [merchant, setMerchant] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [note, setNote] = useState('')
+  const [recurrenceFrequency, setRecurrenceFrequency] =
+    useState<RecurrenceFrequency>('none')
   const [newCategoryName, setNewCategoryName] = useState('')
   const [editingNames, setEditingNames] = useState<Record<number, string>>({})
   const [draggingCategoryId, setDraggingCategoryId] = useState<number | null>(
@@ -198,11 +276,12 @@ export default function Home() {
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editNote, setEditNote] = useState('')
   const [editDate, setEditDate] = useState('')
+  const [editApplyToSeries, setEditApplyToSeries] = useState(false)
   const [showEditDatePicker, setShowEditDatePicker] = useState(false)
   const [lastDeletedExpense, setLastDeletedExpense] = useState<Expense | null>(
     null
   )
-  async function fetchCategories() {
+  const fetchCategories = useCallback(async () => {
     const { data, error } = await supabase
       .from('categories')
       .select('*')
@@ -223,9 +302,9 @@ export default function Home() {
     setEditingNames(
       Object.fromEntries(rows.map((c) => [c.id, c.name]))
     )
-  }
+  }, [])
 
-  async function fetchExpenses() {
+  const fetchExpenseRows = useCallback(async () => {
     const { data, error } = await supabase
       .from('expenses')
       .select('*')
@@ -237,8 +316,98 @@ export default function Home() {
       return
     }
 
-    setExpenses((data as Expense[]) || [])
-  }
+    return (data as Expense[]) || []
+  }, [])
+
+  const createDueRecurringExpenses = useCallback(async (
+    rows: Expense[],
+    currentUserId: string
+  ) => {
+    const today = getTodayDateValue()
+    const groups = rows.reduce<Record<string, Expense[]>>((items, expense) => {
+      const frequency = getExpenseRecurrenceFrequency(expense)
+
+      if (!expense.recurrence_id || frequency === 'none') {
+        return items
+      }
+
+      items[expense.recurrence_id] = [
+        ...(items[expense.recurrence_id] ?? []),
+        expense,
+      ]
+      return items
+    }, {})
+    const dueExpenses = Object.values(groups).flatMap((group) => {
+      const sorted = [...group].sort((a, b) =>
+        a.expense_date.localeCompare(b.expense_date)
+      )
+      const latest = sorted.at(-1)
+      const frequency = latest
+        ? getExpenseRecurrenceFrequency(latest)
+        : 'none'
+
+      if (!latest || frequency === 'none') {
+        return []
+      }
+
+      const expensesToCreate: Omit<Expense, 'id' | 'created_at'>[] = []
+      let nextDate = addRecurringPeriod(latest.expense_date, frequency, 1)
+
+      while (nextDate <= today) {
+        expensesToCreate.push({
+          user_id: currentUserId,
+          amount: latest.amount,
+          merchant: latest.merchant,
+          category: latest.category,
+          note: latest.note,
+          expense_date: nextDate,
+          recurrence_id: latest.recurrence_id,
+          recurrence_frequency: frequency,
+          recurrence_start_date:
+            latest.recurrence_start_date ?? sorted[0].expense_date,
+        })
+        nextDate = addRecurringPeriod(nextDate, frequency, 1)
+      }
+
+      return expensesToCreate
+    })
+
+    if (!dueExpenses.length) {
+      return false
+    }
+
+    const { error } = await supabase.from('expenses').insert(dueExpenses)
+
+    if (error) {
+      setSaveError(error.message)
+      return false
+    }
+
+    return true
+  }, [])
+
+  const fetchExpenses = useCallback(async (currentUserId?: string) => {
+    const rows = await fetchExpenseRows()
+
+    if (!rows) {
+      return
+    }
+
+    if (currentUserId) {
+      const createdRecurringExpenses = await createDueRecurringExpenses(
+        rows,
+        currentUserId
+      )
+
+      if (createdRecurringExpenses) {
+        const refreshedRows = await fetchExpenseRows()
+        setExpenses(refreshedRows ?? rows)
+        return
+      }
+    }
+
+    setExpenses(rows)
+  }, [createDueRecurringExpenses, fetchExpenseRows])
 
   async function addExpense() {
     if (!user) {
@@ -259,6 +428,9 @@ export default function Home() {
     }
 
     setSaveError(null)
+    const expenseDate = getTodayDateValue()
+    const recurrenceId =
+      recurrenceFrequency === 'none' ? null : crypto.randomUUID()
 
     const { error } = await supabase
       .from('expenses')
@@ -267,8 +439,12 @@ export default function Home() {
         merchant: merchant.trim() || null,
         category: selected.name,
         note: note.trim(),
-        expense_date: getTodayDateValue(),
+        expense_date: expenseDate,
         user_id: user.id,
+        recurrence_id: recurrenceId,
+        recurrence_frequency: recurrenceFrequency,
+        recurrence_start_date:
+          recurrenceFrequency === 'none' ? null : expenseDate,
       })
       .select()
       .single()
@@ -282,7 +458,8 @@ export default function Home() {
     setAmount('')
     setMerchant('')
     setNote('')
-    await fetchExpenses()
+    setRecurrenceFrequency('none')
+    await fetchExpenses(user.id)
   }
 
   async function addCategory() {
@@ -354,7 +531,7 @@ export default function Home() {
     }
 
     await fetchCategories()
-    await fetchExpenses()
+    await fetchExpenses(user.id)
   }
 
   function dragCategoryOver(
@@ -467,6 +644,7 @@ export default function Home() {
     setEditCategoryId('')
     setEditNote('')
     setEditDate('')
+    setEditApplyToSeries(false)
     setShowEditDatePicker(false)
   }
 
@@ -476,6 +654,7 @@ export default function Home() {
     setEditMerchant(expense.merchant ?? '')
     setEditNote(expense.note ?? '')
     setEditDate(expense.expense_date)
+    setEditApplyToSeries(false)
     setShowEditDatePicker(false)
     const cat = categories.find((c) => c.name === expense.category)
     setEditCategoryId(cat ? String(cat.id) : '')
@@ -483,6 +662,11 @@ export default function Home() {
 
   async function saveExpense() {
     if (!selectedExpenseId) return
+    const selectedExpense = expenses.find(
+      (expense) => expense.id === selectedExpenseId
+    )
+
+    if (!selectedExpense) return
 
     const selected = categories.find((c) => String(c.id) === editCategoryId)
     if (!editAmount.trim() || !selected) {
@@ -503,16 +687,32 @@ export default function Home() {
 
     setSaveError(null)
 
-    const { error } = await supabase
-      .from('expenses')
-      .update({
-        amount: parsed,
-        merchant: editMerchant.trim() || null,
-        category: selected.name,
-        note: editNote.trim(),
-        expense_date: editDate,
-      })
-      .eq('id', selectedExpenseId)
+    const updateValues = {
+      amount: parsed,
+      merchant: editMerchant.trim() || null,
+      category: selected.name,
+      note: editNote.trim(),
+    }
+    const selectedFrequency = getExpenseRecurrenceFrequency(selectedExpense)
+    const shouldUpdateSeries =
+      editApplyToSeries &&
+      selectedExpense.recurrence_id &&
+      selectedFrequency !== 'none'
+
+    const { error } = shouldUpdateSeries
+      ? await updateExpenseSeries(
+          selectedExpense,
+          selectedFrequency,
+          updateValues,
+          editDate
+        )
+      : await supabase
+          .from('expenses')
+          .update({
+            ...updateValues,
+            expense_date: editDate,
+          })
+          .eq('id', selectedExpenseId)
 
     if (error) {
       setSaveError(error.message)
@@ -521,7 +721,57 @@ export default function Home() {
 
     setLastDeletedExpense(null)
     clearSelectedExpense()
-    await fetchExpenses()
+    await fetchExpenses(user?.id)
+  }
+
+  async function updateExpenseSeries(
+    selectedExpense: Expense,
+    frequency: Exclude<RecurrenceFrequency, 'none'>,
+    updateValues: {
+      amount: number
+      merchant: string | null
+      category: string
+      note: string
+    },
+    selectedDate: string
+  ) {
+    const seriesExpenses = expenses.filter(
+      (expense) => expense.recurrence_id === selectedExpense.recurrence_id
+    )
+    const originalStartDate =
+      selectedExpense.recurrence_start_date ??
+      [...seriesExpenses].sort((a, b) =>
+        a.expense_date.localeCompare(b.expense_date)
+      )[0]?.expense_date ??
+      selectedExpense.expense_date
+    const updatedStartDate = addRecurringPeriod(
+      selectedDate,
+      frequency,
+      getRecurringPeriodOffset(
+        selectedExpense.expense_date,
+        originalStartDate,
+        frequency
+      )
+    )
+    const updates = seriesExpenses.map((expense) => {
+      const periodOffset = getRecurringPeriodOffset(
+        selectedExpense.expense_date,
+        expense.expense_date,
+        frequency
+      )
+
+      return supabase
+        .from('expenses')
+        .update({
+          ...updateValues,
+          expense_date: addRecurringPeriod(selectedDate, frequency, periodOffset),
+          recurrence_start_date: updatedStartDate,
+        })
+        .eq('id', expense.id)
+    })
+    const results = await Promise.all(updates)
+
+    return results.find((result) => result.error) ?? { error: null }
   }
 
   async function deleteExpense() {
@@ -546,7 +796,7 @@ export default function Home() {
 
     setLastDeletedExpense(expenseToDelete)
     clearSelectedExpense()
-    await fetchExpenses()
+    await fetchExpenses(user?.id)
   }
 
   async function undoDeleteExpense() {
@@ -565,7 +815,7 @@ export default function Home() {
     }
 
     setLastDeletedExpense(null)
-    await fetchExpenses()
+    await fetchExpenses(user?.id)
   }
 
   useEffect(() => {
@@ -603,7 +853,7 @@ export default function Home() {
       setAuthLoading(false)
 
       startTransition(() => {
-        void Promise.all([fetchExpenses(), fetchCategories()])
+        void Promise.all([fetchExpenses(userData.user.id), fetchCategories()])
       })
     }
 
@@ -626,7 +876,7 @@ export default function Home() {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [router])
+  }, [fetchCategories, fetchExpenses, router])
 
   useEffect(() => {
     categoriesRef.current = categories
@@ -700,6 +950,7 @@ export default function Home() {
         </optgroup>
       ) : null
     )
+  const signedInEmail = user?.email ?? session.user.email
 
   return (
     <main className="max-w-md mx-auto p-4 space-y-4">
@@ -900,6 +1151,9 @@ export default function Home() {
           </section>
 
           <section className="rounded-xl bg-gray-100 p-4">
+            <p className="mb-3 text-sm text-gray-600">
+              Signed in as {signedInEmail}
+            </p>
             <button
               type="button"
               onClick={() => void signOut()}
@@ -941,6 +1195,20 @@ export default function Home() {
           value={note}
           onChange={(e) => setNote(e.target.value)}
         />
+
+        <select
+          className={inputClass}
+          value={recurrenceFrequency}
+          onChange={(e) =>
+            setRecurrenceFrequency(e.target.value as RecurrenceFrequency)
+          }
+        >
+          {recurrenceOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
 
         {saveError ? (
           <p className="text-sm text-red-600" role="alert">
@@ -1105,6 +1373,22 @@ export default function Home() {
                         value={editNote}
                         onChange={(e) => setEditNote(e.target.value)}
                       />
+                      {expense.recurrence_id &&
+                      getExpenseRecurrenceFrequency(expense) !== 'none' ? (
+                        <label className="flex items-start gap-2 rounded-lg bg-gray-50 p-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={editApplyToSeries}
+                            onChange={(e) =>
+                              setEditApplyToSeries(e.target.checked)
+                            }
+                          />
+                          <span>
+                            Apply these changes to all entries in this repeat
+                          </span>
+                        </label>
+                      ) : null}
                       <div className="flex items-end justify-between gap-2">
                         <div className="relative">
                           <button
@@ -1188,6 +1472,12 @@ export default function Home() {
                     </div>
                     <div>{expense.category}</div>
                     <div className="text-sm text-gray-500">{expense.note}</div>
+                    {expense.recurrence_id &&
+                    getExpenseRecurrenceFrequency(expense) !== 'none' ? (
+                      <div className="mt-2 text-xs font-medium text-blue-600">
+                        Repeats {getExpenseRecurrenceFrequency(expense)}
+                      </div>
+                    ) : null}
                   </>
                 )
 
