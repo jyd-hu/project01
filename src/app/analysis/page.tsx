@@ -228,10 +228,12 @@ export default function AnalysisPage() {
     ),
   }))
   const draftPreference = getDraftPreference()
-  const trendInsights = useMemo(
+  const trendResult = useMemo(
     () => buildSpendingTrendInsights(expenses),
     [expenses]
   )
+  const holidayContext = trendResult.context
+  const trendInsights = trendResult.insights
   const filteredInsights = useMemo(
     () =>
       filterInsightsByPreference(
@@ -392,6 +394,15 @@ export default function AnalysisPage() {
           <p className="text-sm text-gray-500">
             Saved preference: {getPreferenceLabel(savedPreference)}
           </p>
+          {holidayContext.isHolidayWeek ? (
+            <p className="text-sm text-gray-500">
+              Holiday context:{' '}
+              {holidayContext.holidayName
+                ? `${holidayContext.holidayName} week`
+                : 'holiday week'}
+              . Comparisons are softened for this period.
+            </p>
+          ) : null}
         </div>
 
         {filteredInsights.length ? (

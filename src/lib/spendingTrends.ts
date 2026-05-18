@@ -12,6 +12,34 @@ export type SpendingTrendInsight = {
   valueLabel: string
 }
 
+export type SpendingTrendContext = {
+  isHolidayWeek: boolean
+  holidayName?: string
+}
+
+export type SpendingTrendResult = {
+  context: SpendingTrendContext
+  insights: SpendingTrendInsight[]
+}
+
+type TrendInsightDisplayRule = {
+  type: 'monthlyIncrease'
+  changeAmount: number
+  changeRatio: number | null
+}
+
+type SpendingTrendInsightWithDisplayRule = SpendingTrendInsight & {
+  displayRule?: TrendInsightDisplayRule
+}
+
+const fixedHolidayDates = [
+  { month: 1, day: 1, name: "New Year's Day" },
+  { month: 12, day: 25, name: 'Christmas Day' },
+  { month: 12, day: 26, name: 'Boxing Day' },
+]
+
+const lowValueHolidayChangeRatio = 0.1
+
 const currencyFormatter = new Intl.NumberFormat('en-GB', {
   style: 'currency',
   currency: 'GBP',
@@ -33,6 +61,39 @@ function toMonthKey(date: Date) {
 
 function addMonths(date: Date, months: number) {
   return new Date(date.getFullYear(), date.getMonth() + months, 1)
+}
+
+function getWeekStart(date: Date) {
+  const weekStart = new Date(date)
+  const day = weekStart.getDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  weekStart.setDate(weekStart.getDate() + mondayOffset)
+
+  return weekStart
+}
+
+function getHolidayContext(date: Date): SpendingTrendContext {
+  const weekStart = getWeekStart(date)
+
+  for (let dayOffset = 0; dayOffset < 7; dayOffset += 1) {
+    const weekDate = new Date(weekStart)
+    weekDate.setDate(weekStart.getDate() + dayOffset)
+
+    const holiday = fixedHolidayDates.find(
+      (fixedHoliday) =>
+        fixedHoliday.month === weekDate.getMonth() + 1 &&
+        fixedHoliday.day === weekDate.getDate()
+    )
+
+    if (holiday) {
+      return {
+        isHolidayWeek: true,
+        holidayName: holiday.name,
+      }
+    }
+  }
+
+  return { isHolidayWeek: false }
 }
 
 function daysBetween(start: Date, end: Date) {
@@ -64,10 +125,58 @@ function getMonthlyCategoryTotals(expenses: TrendExpense[]) {
   )
 }
 
+function toSpendingTrendInsight(
+  insight: SpendingTrendInsightWithDisplayRule
+): SpendingTrendInsight {
+  return {
+    id: insight.id,
+    category: insight.category,
+    title: insight.title,
+    detail: insight.detail,
+    valueLabel: insight.valueLabel,
+  }
+}
+
+function formatInsightsForContext(
+  insights: SpendingTrendInsightWithDisplayRule[],
+  context: SpendingTrendContext
+): SpendingTrendInsight[] {
+  if (!context.isHolidayWeek) {
+    return insights.map(toSpendingTrendInsight)
+  }
+
+  const holidayPeriod = context.holidayName
+    ? `${context.holidayName} period`
+    : 'holiday period'
+
+  return insights.flatMap((insight) => {
+    if (insight.displayRule?.type !== 'monthlyIncrease') {
+      return [toSpendingTrendInsight(insight)]
+    }
+
+    if (
+      insight.displayRule.changeRatio !== null &&
+      insight.displayRule.changeRatio < lowValueHolidayChangeRatio
+    ) {
+      return []
+    }
+
+    return [
+      {
+        ...toSpendingTrendInsight(insight),
+        title: 'Higher holiday-period spend',
+        detail: `${insight.category} spending was higher recently (${holidayPeriod}).`,
+        valueLabel: formatCurrency(insight.displayRule.changeAmount),
+      },
+    ]
+  })
+}
+
 export function buildSpendingTrendInsights(
   expenses: TrendExpense[],
   today = new Date()
-): SpendingTrendInsight[] {
+): SpendingTrendResult {
+  const context = getHolidayContext(today)
   const datedExpenses = expenses
     .map((expense) => ({
       ...expense,
@@ -79,10 +188,13 @@ export function buildSpendingTrendInsights(
     )
 
   if (!datedExpenses.length) {
-    return []
+    return {
+      context,
+      insights: [],
+    }
   }
 
-  const insights: SpendingTrendInsight[] = []
+  const insights: SpendingTrendInsightWithDisplayRule[] = []
   const last30DayStart = new Date(today)
   last30DayStart.setDate(today.getDate() - 30)
 
@@ -119,6 +231,7 @@ export function buildSpendingTrendInsights(
   const monthlyIncreases = Object.entries(currentMonthTotals)
     .map(([category, total]) => ({
       category,
+      previousTotal: previousMonthTotals[category] ?? 0,
       increase: total - (previousMonthTotals[category] ?? 0),
     }))
     .filter((item) => item.increase > 0)
@@ -131,6 +244,14 @@ export function buildSpendingTrendInsights(
       title: 'Biggest monthly increase',
       detail: `${increase.category} is up compared with last month.`,
       valueLabel: `+${formatCurrency(increase.increase)}`,
+      displayRule: {
+        type: 'monthlyIncrease',
+        changeAmount: increase.increase,
+        changeRatio:
+          increase.previousTotal > 0
+            ? increase.increase / increase.previousTotal
+            : null,
+      },
     })
   })
 
@@ -168,5 +289,8 @@ export function buildSpendingTrendInsights(
     })
   }
 
-  return insights
+  return {
+    context,
+    insights: formatInsightsForContext(insights, context),
+  }
 }
