@@ -10,6 +10,7 @@ type Expense = {
   id: string
   user_id: string
   amount: number
+  merchant: string | null
   category: string
   note: string
   created_at: string
@@ -109,6 +110,7 @@ export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [amount, setAmount] = useState('')
+  const [merchant, setMerchant] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [note, setNote] = useState('')
   const [newCategoryName, setNewCategoryName] = useState('')
@@ -119,6 +121,7 @@ export default function Home() {
   const [editMode, setEditMode] = useState(false)
   const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
   const [editAmount, setEditAmount] = useState('')
+  const [editMerchant, setEditMerchant] = useState('')
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editNote, setEditNote] = useState('')
   const [editDate, setEditDate] = useState('')
@@ -183,6 +186,7 @@ export default function Home() {
       .from('expenses')
       .insert({
         amount: parsed,
+        merchant: merchant.trim() || null,
         category: selected.name,
         note: note.trim(),
         expense_date: getTodayDateValue(),
@@ -198,6 +202,7 @@ export default function Home() {
 
     setLastDeletedExpense(null)
     setAmount('')
+    setMerchant('')
     setNote('')
     await fetchExpenses()
   }
@@ -297,6 +302,7 @@ export default function Home() {
   function clearSelectedExpense() {
     setSelectedExpenseId(null)
     setEditAmount('')
+    setEditMerchant('')
     setEditCategoryId('')
     setEditNote('')
     setEditDate('')
@@ -306,6 +312,7 @@ export default function Home() {
   function selectExpenseForEdit(expense: Expense) {
     setSelectedExpenseId(expense.id)
     setEditAmount(String(expense.amount))
+    setEditMerchant(expense.merchant ?? '')
     setEditNote(expense.note ?? '')
     setEditDate(expense.expense_date)
     setShowEditDatePicker(false)
@@ -339,6 +346,7 @@ export default function Home() {
       .from('expenses')
       .update({
         amount: parsed,
+        merchant: editMerchant.trim() || null,
         category: selected.name,
         note: editNote.trim(),
         expense_date: editDate,
@@ -647,6 +655,13 @@ export default function Home() {
           onChange={(e) => setAmount(e.target.value)}
         />
 
+        <input
+          className={inputClass}
+          placeholder="Merchant (optional)"
+          value={merchant}
+          onChange={(e) => setMerchant(e.target.value)}
+        />
+
         <select
           className={inputClass}
           value={categoryId}
@@ -810,6 +825,12 @@ export default function Home() {
                         value={editAmount}
                         onChange={(e) => setEditAmount(e.target.value)}
                       />
+                      <input
+                        className={inputClass}
+                        placeholder="Merchant (optional)"
+                        value={editMerchant}
+                        onChange={(e) => setEditMerchant(e.target.value)}
+                      />
                       <select
                         className={inputClass}
                         value={editCategoryId}
@@ -901,7 +922,14 @@ export default function Home() {
 
                 const card = (
                   <>
-                    <div className="font-semibold">£{expense.amount}</div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="font-semibold">£{expense.amount}</div>
+                      {expense.merchant ? (
+                        <div className="text-right text-sm text-gray-500">
+                          {expense.merchant}
+                        </div>
+                      ) : null}
+                    </div>
                     <div>{expense.category}</div>
                     <div className="text-sm text-gray-500">{expense.note}</div>
                   </>

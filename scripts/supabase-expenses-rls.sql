@@ -5,6 +5,9 @@ alter table public.expenses
   add column if not exists expense_date date;
 
 alter table public.expenses
+  add column if not exists merchant text;
+
+alter table public.expenses
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
 update public.expenses
