@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, startTransition } from 'react'
+import { useEffect, useRef, useState, startTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session, User } from '@supabase/supabase-js'
@@ -21,10 +21,18 @@ type Category = {
   id: number
   user_id: string
   name: string
+  category_group: CategoryGroup
+  display_order: number
   created_at: string
 }
 
 type ExpenseView = 'date' | 'category'
+type CategoryGroup = 'essential' | 'non_essential'
+
+const categoryGroups: { value: CategoryGroup; label: string }[] = [
+  { value: 'essential', label: 'Essential' },
+  { value: 'non_essential', label: 'Non-essential' },
+]
 
 const inputClass =
   'w-full rounded border border-gray-200 bg-white p-2 text-gray-900 placeholder:text-gray-400'
@@ -73,6 +81,66 @@ function toDateValue(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+function normalizeCategoryGroup(group: string | null | undefined): CategoryGroup {
+  return group === 'non_essential' ? 'non_essential' : 'essential'
+}
+
+function orderCategories(categories: Category[]) {
+  return categoryGroups.flatMap((group) =>
+    categories
+      .filter((category) => category.category_group === group.value)
+      .map((category, index) => ({
+        ...category,
+        display_order: index + 1,
+      }))
+  )
+}
+
+function reorderCategories(
+  categories: Category[],
+  draggedCategoryId: number,
+  targetGroup: CategoryGroup,
+  targetIndex: number
+) {
+  const draggedCategory = categories.find(
+    (category) => category.id === draggedCategoryId
+  )
+
+  if (!draggedCategory) {
+    return categories
+  }
+
+  const remainingCategories = categories.filter(
+    (category) => category.id !== draggedCategoryId
+  )
+  const targetGroupCategories = remainingCategories.filter(
+    (category) => category.category_group === targetGroup
+  )
+  const nextTargetIndex = Math.min(
+    Math.max(targetIndex, 0),
+    targetGroupCategories.length
+  )
+  const movedCategory = {
+    ...draggedCategory,
+    category_group: targetGroup,
+  }
+  const nextTargetGroupCategories = [
+    ...targetGroupCategories.slice(0, nextTargetIndex),
+    movedCategory,
+    ...targetGroupCategories.slice(nextTargetIndex),
+  ]
+
+  return orderCategories(
+    categoryGroups.flatMap((group) =>
+      group.value === targetGroup
+        ? nextTargetGroupCategories
+        : remainingCategories.filter(
+            (category) => category.category_group === group.value
+          )
+    )
+  )
+}
+
 function getWeekStartDateValue(date: string) {
   const parsed = parseExpenseDate(date)
 
@@ -104,6 +172,8 @@ function formatWeekRange(weekStart: string) {
 
 export default function Home() {
   const router = useRouter()
+  const categoryDropHandled = useRef(false)
+  const categoriesRef = useRef<Category[]>([])
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -115,6 +185,9 @@ export default function Home() {
   const [note, setNote] = useState('')
   const [newCategoryName, setNewCategoryName] = useState('')
   const [editingNames, setEditingNames] = useState<Record<number, string>>({})
+  const [draggingCategoryId, setDraggingCategoryId] = useState<number | null>(
+    null
+  )
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showCategories, setShowCategories] = useState(false)
   const [expenseView, setExpenseView] = useState<ExpenseView>('date')
@@ -133,6 +206,8 @@ export default function Home() {
     const { data, error } = await supabase
       .from('categories')
       .select('*')
+      .order('category_group', { ascending: true })
+      .order('display_order', { ascending: true })
       .order('id', { ascending: true })
 
     if (error) {
@@ -140,7 +215,10 @@ export default function Home() {
       return
     }
 
-    const rows = (data as Category[]) || []
+    const rows = ((data as Category[]) || []).map((category) => ({
+      ...category,
+      category_group: normalizeCategoryGroup(category.category_group),
+    }))
     setCategories(rows)
     setEditingNames(
       Object.fromEntries(rows.map((c) => [c.id, c.name]))
@@ -218,9 +296,22 @@ export default function Home() {
 
     setSaveError(null)
 
+    const displayOrder =
+      Math.max(
+        0,
+        ...categories
+          .filter((category) => category.category_group === 'essential')
+          .map((category) => category.display_order)
+      ) + 1
+
     const { data, error } = await supabase
       .from('categories')
-      .insert({ name, user_id: user.id })
+      .insert({
+        name,
+        category_group: 'essential',
+        display_order: displayOrder,
+        user_id: user.id,
+      })
       .select()
       .single()
 
@@ -246,11 +337,14 @@ export default function Home() {
       setSaveError('Category name cannot be empty.')
       return
     }
+    const category = categories.find((item) => item.id === id)
+    const group = category?.category_group ?? 'essential'
 
     setSaveError(null)
 
-    const { error } = await supabase.rpc('rename_category', {
+    const { error } = await supabase.rpc('update_category', {
       category_id: id,
+      category_group_value: group,
       category_name: name,
     })
 
@@ -261,6 +355,73 @@ export default function Home() {
 
     await fetchCategories()
     await fetchExpenses()
+  }
+
+  function dragCategoryOver(
+    targetGroup: CategoryGroup,
+    targetIndex: number
+  ) {
+    if (!draggingCategoryId) return
+
+    setCategories((current) => {
+      const nextCategories = reorderCategories(
+        current,
+        draggingCategoryId,
+        targetGroup,
+        targetIndex
+      )
+      categoriesRef.current = nextCategories
+      return nextCategories
+    })
+  }
+
+  function startCategoryDrag(categoryId: number) {
+    categoryDropHandled.current = false
+    setDraggingCategoryId(categoryId)
+  }
+
+  async function finishCategoryDrag() {
+    categoryDropHandled.current = true
+    await saveCategoryOrder()
+  }
+
+  async function saveCategoryOrder() {
+    if (!user || !draggingCategoryId) {
+      setDraggingCategoryId(null)
+      return
+    }
+
+    setSaveError(null)
+
+    const updates = categoriesRef.current.map((category) =>
+      supabase
+        .from('categories')
+        .update({
+          category_group: category.category_group,
+          display_order: category.display_order,
+        })
+        .eq('id', category.id)
+        .eq('user_id', user.id)
+    )
+    const results = await Promise.all(updates)
+    const failedUpdate = results.find((result) => result.error)
+
+    setDraggingCategoryId(null)
+
+    if (failedUpdate?.error) {
+      setSaveError(failedUpdate.error.message)
+      await fetchCategories()
+      return
+    }
+
+    await fetchCategories()
+  }
+
+  async function cancelCategoryDrag() {
+    if (!draggingCategoryId || categoryDropHandled.current) return
+
+    setDraggingCategoryId(null)
+    await fetchCategories()
   }
 
   async function deleteCategory(id: number) {
@@ -467,6 +628,10 @@ export default function Home() {
     }
   }, [router])
 
+  useEffect(() => {
+    categoriesRef.current = categories
+  }, [categories])
+
   async function signOut() {
     await supabase.auth.signOut()
     router.replace('/login')
@@ -517,6 +682,24 @@ export default function Home() {
     category.total += expense.amount
     return weeks
   }, [])
+  const groupedCategorySections = categoryGroups.map((group) => ({
+    ...group,
+    categories: categories.filter(
+      (category) => category.category_group === group.value
+    ),
+  }))
+  const renderCategoryOptions = () =>
+    groupedCategorySections.map((group) =>
+      group.categories.length ? (
+        <optgroup key={group.value} label={group.label}>
+          {group.categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
+        </optgroup>
+      ) : null
+    )
 
   return (
     <main className="max-w-md mx-auto p-4 space-y-4">
@@ -584,36 +767,117 @@ export default function Home() {
               Manage categories
             </h2>
 
-            <ul className="space-y-2">
-              {categories.map((c) => (
-                <li key={c.id} className="flex gap-2">
-                  <input
-                    className={`${inputClass} flex-1`}
-                    value={editingNames[c.id] ?? c.name}
-                    onChange={(e) =>
-                      setEditingNames((prev) => ({
-                        ...prev,
-                        [c.id]: e.target.value,
-                      }))
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void saveCategory(c.id)}
-                    className="shrink-0 rounded bg-black px-3 py-2 text-sm text-white"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void deleteCategory(c.id)}
-                    className="shrink-0 rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                  >
-                    Delete
-                  </button>
-                </li>
+            <div className="space-y-4">
+              {groupedCategorySections.map((group) => (
+                <section
+                  key={group.value}
+                  className="space-y-2"
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    dragCategoryOver(group.value, group.categories.length)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    void finishCategoryDrag()
+                  }}
+                >
+                  <h3 className="text-sm font-semibold text-gray-600">
+                    {group.label}
+                  </h3>
+                  {group.categories.length ? (
+                    <ul className="space-y-2">
+                      {group.categories.map((c, index) => (
+                        <li
+                          key={c.id}
+                          className={`rounded-lg border border-gray-200 bg-white p-2 ${
+                            draggingCategoryId === c.id ? 'opacity-60' : ''
+                          }`}
+                          onDragOver={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            dragCategoryOver(group.value, index)
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            void finishCategoryDrag()
+                          }}
+                        >
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move'
+                                startCategoryDrag(c.id)
+                              }}
+                              onDragEnd={() => void cancelCategoryDrag()}
+                              className="shrink-0 cursor-grab rounded border border-gray-300 bg-white px-2 py-2 text-gray-500 active:cursor-grabbing"
+                              aria-label={`Drag ${c.name}`}
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden
+                              >
+                                <path d="M4 7h16" />
+                                <path d="M4 12h16" />
+                                <path d="M4 17h16" />
+                              </svg>
+                            </button>
+                            <input
+                              className={`${inputClass} flex-1`}
+                              value={editingNames[c.id] ?? c.name}
+                              onChange={(e) =>
+                                setEditingNames((prev) => ({
+                                  ...prev,
+                                  [c.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void saveCategory(c.id)}
+                              className="shrink-0 rounded bg-black px-3 py-2 text-sm text-white"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteCategory(c.id)}
+                              className="shrink-0 rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div
+                      className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500"
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        dragCategoryOver(group.value, 0)
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        void finishCategoryDrag()
+                      }}
+                    >
+                      Drop categories here
+                    </div>
+                  )}
+                </section>
               ))}
-            </ul>
+            </div>
 
             <div className="flex gap-2">
               <input
@@ -668,11 +932,7 @@ export default function Home() {
           onChange={(e) => setCategoryId(e.target.value)}
         >
           <option value="">Select category</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
+          {renderCategoryOptions()}
         </select>
 
         <input
@@ -837,11 +1097,7 @@ export default function Home() {
                         onChange={(e) => setEditCategoryId(e.target.value)}
                       >
                         <option value="">Select category</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
+                        {renderCategoryOptions()}
                       </select>
                       <input
                         className={inputClass}

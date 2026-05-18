@@ -5,10 +5,45 @@ alter table public.categories
   add column if not exists monthly_budget numeric not null default 0;
 
 alter table public.categories
+  add column if not exists category_group text not null default 'essential';
+
+alter table public.categories
+  add column if not exists display_order integer;
+
+alter table public.categories
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
 create index if not exists categories_user_id_idx
   on public.categories (user_id);
+
+alter table public.categories
+  drop constraint if exists categories_category_group_valid;
+
+alter table public.categories
+  add constraint categories_category_group_valid
+  check (category_group in ('essential', 'non_essential'));
+
+with ordered_categories as (
+  select
+    id,
+    row_number() over (
+      partition by user_id, category_group
+      order by id
+    ) as next_display_order
+  from public.categories
+)
+update public.categories c
+set display_order = ordered_categories.next_display_order
+from ordered_categories
+where c.id = ordered_categories.id
+  and c.display_order is null;
+
+alter table public.categories
+  alter column display_order set default 0,
+  alter column display_order set not null;
+
+create index if not exists categories_user_group_order_idx
+  on public.categories (user_id, category_group, display_order, id);
 
 do $$
 declare
@@ -126,3 +161,72 @@ $$;
 
 revoke execute on function public.rename_category(integer, text) from public;
 grant execute on function public.rename_category(integer, text) to authenticated;
+
+create or replace function public.update_category(
+  category_id integer,
+  category_name text,
+  category_group_value text
+)
+returns void
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  old_name text;
+  old_group text;
+  next_name text := btrim(category_name);
+  next_group text := coalesce(nullif(btrim(category_group_value), ''), 'essential');
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if next_name is null or next_name = '' then
+    raise exception 'Category name cannot be empty.';
+  end if;
+
+  if next_group not in ('essential', 'non_essential') then
+    raise exception 'Category group is invalid.';
+  end if;
+
+  select c.name, c.category_group
+    into old_name, old_group
+  from public.categories c
+  where c.id = category_id
+    and c.user_id = auth.uid();
+
+  if old_name is null then
+    raise exception 'Category not found.';
+  end if;
+
+  update public.categories
+  set
+    name = next_name,
+    category_group = next_group,
+    display_order = case
+      when old_group is distinct from next_group then coalesce(
+        (
+          select max(display_order) + 1
+          from public.categories
+          where user_id = auth.uid()
+            and category_group = next_group
+        ),
+        1
+      )
+      else display_order
+    end
+  where id = category_id
+    and user_id = auth.uid();
+
+  if old_name <> next_name then
+    update public.expenses
+    set category = next_name
+    where user_id = auth.uid()
+      and category = old_name;
+  end if;
+end;
+$$;
+
+revoke execute on function public.update_category(integer, text, text) from public;
+grant execute on function public.update_category(integer, text, text) to authenticated;

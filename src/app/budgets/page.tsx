@@ -9,6 +9,8 @@ import { supabase } from '@/lib/supabase'
 type Category = {
   id: number
   name: string
+  category_group: CategoryGroup
+  display_order: number
   monthly_budget?: number | null
 }
 
@@ -16,6 +18,13 @@ type Expense = {
   amount: number
   category: string
 }
+
+type CategoryGroup = 'essential' | 'non_essential'
+
+const categoryGroups: { value: CategoryGroup; label: string }[] = [
+  { value: 'essential', label: 'Essential' },
+  { value: 'non_essential', label: 'Non-essential' },
+]
 
 const categoryColors = [
   { label: '#fde68a', fill: '#fef3c7' },
@@ -75,6 +84,10 @@ function getMonthProgress(date: Date) {
   return Math.min(Math.max((elapsed / duration) * 100, 0), 100)
 }
 
+function normalizeCategoryGroup(group: string | null | undefined): CategoryGroup {
+  return group === 'non_essential' ? 'non_essential' : 'essential'
+}
+
 export default function BudgetsPage() {
   const router = useRouter()
   const [authLoading, setAuthLoading] = useState(true)
@@ -91,7 +104,9 @@ export default function BudgetsPage() {
   async function fetchCategories() {
     const { data, error } = await supabase
       .from('categories')
-      .select('id, name, monthly_budget')
+      .select('id, name, category_group, display_order, monthly_budget')
+      .order('category_group', { ascending: true })
+      .order('display_order', { ascending: true })
       .order('id', { ascending: true })
 
     if (error) {
@@ -99,7 +114,10 @@ export default function BudgetsPage() {
       return
     }
 
-    const rows = (data as Category[]) || []
+    const rows = ((data as Category[]) || []).map((category) => ({
+      ...category,
+      category_group: normalizeCategoryGroup(category.category_group),
+    }))
     setCategories(rows)
     setBudgetInputs(
       Object.fromEntries(
@@ -238,6 +256,12 @@ export default function BudgetsPage() {
 
   const todayLabel = today ? formatTodayDate(today) : 'Today'
   const monthProgress = today ? getMonthProgress(today).toFixed(4) : '0'
+  const groupedCategorySections = categoryGroups.map((group) => ({
+    ...group,
+    categories: categories.filter(
+      (category) => category.category_group === group.value
+    ),
+  }))
 
   return (
     <main className="mx-auto max-w-md space-y-4 p-4">
@@ -337,70 +361,87 @@ export default function BudgetsPage() {
             </p>
           ) : null}
 
-          <div className="space-y-2">
-            {categories.map((category, index) => {
-              const budget = category.monthly_budget ?? 0
-              const inputBudget = Number(budgetInputs[category.id])
-              const weeklyBudget = Number.isFinite(inputBudget)
-                ? (inputBudget * 12) / 52
-                : 0
-              const spent = monthlySpendByCategory[category.name] ?? 0
-              const spentPercent =
-                budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
-              const remainingBudget = budget - spent
-              const isOverBudget = remainingBudget < 0
-              const color = categoryColors[index % categoryColors.length]
+          <div className="space-y-4">
+            {groupedCategorySections.map((group) => (
+              <section key={group.value} className="space-y-2">
+                <h3 className="text-sm font-semibold text-gray-600">
+                  {group.label}
+                </h3>
+                {group.categories.length ? (
+                  <div className="space-y-2">
+                    {group.categories.map((category) => {
+                      const budget = category.monthly_budget ?? 0
+                      const inputBudget = Number(budgetInputs[category.id])
+                      const weeklyBudget = Number.isFinite(inputBudget)
+                        ? (inputBudget * 12) / 52
+                        : 0
+                      const spent = monthlySpendByCategory[category.name] ?? 0
+                      const spentPercent =
+                        budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
+                      const remainingBudget = budget - spent
+                      const isOverBudget = remainingBudget < 0
+                      const color =
+                        categoryColors[
+                          categories.findIndex((item) => item.id === category.id) %
+                            categoryColors.length
+                        ]
 
-              return (
-                <div
-                  key={category.id}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3"
-                  style={{
-                    background: `linear-gradient(to right, ${color.fill} ${spentPercent}%, #ffffff ${spentPercent}%)`,
-                  }}
-                >
-                  <span
-                    className="rounded-full px-2 py-1 text-sm font-medium text-gray-900"
-                    style={{ backgroundColor: color.label }}
-                  >
-                    {category.name}
-                  </span>
-                  {editMode ? (
-                    <div className="flex flex-col items-end gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        className="w-24 rounded border border-gray-200 bg-white p-2 text-right text-gray-900"
-                        value={budgetInputs[category.id] ?? '0'}
-                        onChange={(e) =>
-                          setBudgetInputs((current) => ({
-                            ...current,
-                            [category.id]: e.target.value,
-                          }))
-                        }
-                      />
-                      <p className="text-xs text-gray-600">
-                        ≈ £{weeklyBudget.toFixed(2)} weekly
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-end">
-                      <span
-                        className={`font-semibold ${
-                          isOverBudget ? 'text-red-600' : ''
-                        }`}
-                      >
-                        £{remainingBudget.toFixed(2)} left
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        of £{budget.toFixed(2)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+                      return (
+                        <div
+                          key={category.id}
+                          className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3"
+                          style={{
+                            background: `linear-gradient(to right, ${color.fill} ${spentPercent}%, #ffffff ${spentPercent}%)`,
+                          }}
+                        >
+                          <span
+                            className="rounded-full px-2 py-1 text-sm font-medium text-gray-900"
+                            style={{ backgroundColor: color.label }}
+                          >
+                            {category.name}
+                          </span>
+                          {editMode ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                className="w-24 rounded border border-gray-200 bg-white p-2 text-right text-gray-900"
+                                value={budgetInputs[category.id] ?? '0'}
+                                onChange={(e) =>
+                                  setBudgetInputs((current) => ({
+                                    ...current,
+                                    [category.id]: e.target.value,
+                                  }))
+                                }
+                              />
+                              <p className="text-xs text-gray-600">
+                                ≈ £{weeklyBudget.toFixed(2)} weekly
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-end">
+                              <span
+                                className={`font-semibold ${
+                                  isOverBudget ? 'text-red-600' : ''
+                                }`}
+                              >
+                                £{remainingBudget.toFixed(2)} left
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                of £{budget.toFixed(2)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No categories</p>
+                )}
+              </section>
+            ))}
           </div>
         </div>
       </section>
