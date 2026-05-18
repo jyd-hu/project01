@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { startTransition, useEffect, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
 type Category = {
@@ -77,6 +78,7 @@ function getMonthProgress(date: Date) {
 export default function BudgetsPage() {
   const router = useRouter()
   const [authLoading, setAuthLoading] = useState(true)
+  const [user, setUser] = useState<User | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [budgetInputs, setBudgetInputs] = useState<Record<number, string>>({})
   const [monthlySpendByCategory, setMonthlySpendByCategory] = useState<
@@ -133,6 +135,11 @@ export default function BudgetsPage() {
   }
 
   async function saveBudgets() {
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
     const updates = categories.map((category) => ({
       id: category.id,
       monthlyBudget: Number(budgetInputs[category.id]),
@@ -156,6 +163,7 @@ export default function BudgetsPage() {
           .from('categories')
           .update({ monthly_budget: update.monthlyBudget })
           .eq('id', update.id)
+          .eq('user_id', user.id)
       )
     )
     const failedUpdate = results.find((result) => result.error)
@@ -190,6 +198,7 @@ export default function BudgetsPage() {
       }
 
       setAuthLoading(false)
+      setUser(data.session.user)
       setToday(new Date())
 
       startTransition(() => {
@@ -203,8 +212,12 @@ export default function BudgetsPage() {
       if (!mounted) return
 
       if (!session) {
+        setUser(null)
         router.replace('/login')
+        return
       }
+
+      setUser(session.user)
     })
 
     void loadSession()

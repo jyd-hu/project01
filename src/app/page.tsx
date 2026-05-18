@@ -18,6 +18,7 @@ type Expense = {
 
 type Category = {
   id: number
+  user_id: string
   name: string
   created_at: string
 }
@@ -202,6 +203,11 @@ export default function Home() {
   }
 
   async function addCategory() {
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
     const name = newCategoryName.trim()
     if (!name) return
 
@@ -209,7 +215,7 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from('categories')
-      .insert({ name })
+      .insert({ name, user_id: user.id })
       .select()
       .single()
 
@@ -225,6 +231,11 @@ export default function Home() {
   }
 
   async function saveCategory(id: number) {
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
     const name = editingNames[id]?.trim()
     if (!name) {
       setSaveError('Category name cannot be empty.')
@@ -233,10 +244,10 @@ export default function Home() {
 
     setSaveError(null)
 
-    const { error } = await supabase
-      .from('categories')
-      .update({ name })
-      .eq('id', id)
+    const { error } = await supabase.rpc('rename_category', {
+      category_id: id,
+      category_name: name,
+    })
 
     if (error) {
       setSaveError(error.message)
@@ -248,6 +259,11 @@ export default function Home() {
   }
 
   async function deleteCategory(id: number) {
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
     if (categories.length <= 1) {
       setSaveError('You need at least one category.')
       return
@@ -255,7 +271,11 @@ export default function Home() {
 
     setSaveError(null)
 
-    const { error } = await supabase.from('categories').delete().eq('id', id)
+    const { error } = await supabase
+      .from('categories')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
 
     if (error) {
       setSaveError(error.message)
