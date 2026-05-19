@@ -86,7 +86,7 @@ export default function AnalysisPage() {
         .order('id', { ascending: true }),
       supabase
         .from('expenses')
-        .select('amount, category, expense_date')
+        .select('amount, category, expense_date, normalized_merchant')
         .order('expense_date', { ascending: false }),
     ])
 

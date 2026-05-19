@@ -8,6 +8,11 @@ alter table public.expenses
   add column if not exists merchant text;
 
 alter table public.expenses
+  add column if not exists normalized_merchant text;
+
+-- See scripts/supabase-normalized-merchant-migration.sql for backfill, trigger, and indexes.
+
+alter table public.expenses
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
 alter table public.expenses

@@ -10,6 +10,7 @@ import {
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session, User } from '@supabase/supabase-js'
+import { isDuplicateExpense } from '@/lib/merchant'
 import { supabase } from '@/lib/supabase'
 
 type Expense = {
@@ -17,6 +18,7 @@ type Expense = {
   user_id: string
   amount: number
   merchant: string | null
+  normalized_merchant: string | null
   category: string
   note: string
   created_at: string
@@ -350,7 +352,10 @@ export default function Home() {
         return []
       }
 
-      const expensesToCreate: Omit<Expense, 'id' | 'created_at'>[] = []
+      const expensesToCreate: Omit<
+        Expense,
+        'id' | 'created_at' | 'normalized_merchant'
+      >[] = []
       let nextDate = addRecurringPeriod(latest.expense_date, frequency, 1)
 
       while (nextDate <= today) {
@@ -431,12 +436,13 @@ export default function Home() {
     const expenseDate = getTodayDateValue()
     const recurrenceId =
       recurrenceFrequency === 'none' ? null : crypto.randomUUID()
+    const trimmedMerchant = merchant.trim() || null
 
-    const { error } = await supabase
+    const { data: inserted, error } = await supabase
       .from('expenses')
       .insert({
         amount: parsed,
-        merchant: merchant.trim() || null,
+        merchant: trimmedMerchant,
         category: selected.name,
         note: note.trim(),
         expense_date: expenseDate,
@@ -446,11 +452,26 @@ export default function Home() {
         recurrence_start_date:
           recurrenceFrequency === 'none' ? null : expenseDate,
       })
-      .select()
+      .select('id, normalized_merchant, amount, expense_date, created_at')
       .single()
 
     if (error) {
       setSaveError(error.message)
+      return
+    }
+
+    if (
+      inserted &&
+      isDuplicateExpense(expenses, {
+        normalized_merchant: inserted.normalized_merchant,
+        amount: inserted.amount,
+        expense_date: inserted.expense_date,
+      })
+    ) {
+      await supabase.from('expenses').delete().eq('id', inserted.id)
+      setSaveError(
+        'A matching expense was just added. Wait a moment or change the details.'
+      )
       return
     }
 

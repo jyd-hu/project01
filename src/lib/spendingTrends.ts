@@ -2,6 +2,7 @@ export type TrendExpense = {
   amount: number
   category: string
   expense_date: string
+  normalized_merchant?: string | null
 }
 
 export type SpendingTrendInsight = {
