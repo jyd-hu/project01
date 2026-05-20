@@ -12,6 +12,7 @@ export type AnalysisCategory =
     }
 
 export type TrendInsightWithCategory = {
+  kind?: 'category' | 'merchant'
   category: string
   title: string
 }
@@ -144,7 +145,10 @@ export function filterInsightsByPreference<T extends TrendInsightWithCategory>(
 ) {
   const selectedCategories = getSelectedInsightCategories(categories, preference)
   const filteredInsights = selectedCategories
-    ? insights.filter((insight) => selectedCategories.has(insight.category))
+    ? insights.filter(
+        (insight) =>
+          insight.kind === 'merchant' || selectedCategories.has(insight.category)
+      )
     : insights
 
   const seenTitles = new Set<string>()

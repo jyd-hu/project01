@@ -86,7 +86,7 @@ export default function AnalysisPage() {
         .order('id', { ascending: true }),
       supabase
         .from('expenses')
-        .select('amount, category, expense_date, normalized_merchant')
+        .select('amount, category, expense_date, merchant, normalized_merchant')
         .order('expense_date', { ascending: false }),
     ])
 
@@ -419,7 +419,9 @@ export default function AnalysisPage() {
                   </span>
                 </div>
                 <p className="mt-2 text-xs font-medium text-gray-500">
-                  {insight.category}
+                  {insight.kind === 'merchant'
+                    ? insight.merchant
+                    : insight.category}
                 </p>
               </article>
             ))}

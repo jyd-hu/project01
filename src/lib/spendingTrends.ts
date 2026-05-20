@@ -1,13 +1,24 @@
+import {
+  buildMerchantDisplayLookup,
+  groupAmountsByNormalizedMerchant,
+  resolveMerchantDisplay,
+} from '@/lib/merchant'
+
 export type TrendExpense = {
   amount: number
   category: string
   expense_date: string
-  normalized_merchant?: string | null
+  merchant: string | null
+  normalized_merchant: string | null
 }
 
 export type SpendingTrendInsight = {
   id: string
+  kind: 'category' | 'merchant'
   category: string
+  /** Raw merchant label for UI; null for category insights. */
+  merchant: string | null
+  normalized_merchant: string | null
   title: string
   detail: string
   valueLabel: string
@@ -126,12 +137,35 @@ function getMonthlyCategoryTotals(expenses: TrendExpense[]) {
   )
 }
 
+function getMonthlyMerchantTotals(expenses: TrendExpense[]) {
+  return expenses.reduce<Record<string, Record<string, number>>>(
+    (totals, expense) => {
+      const parsedDate = parseExpenseDate(expense.expense_date)
+
+      if (!parsedDate || !expense.normalized_merchant) {
+        return totals
+      }
+
+      const monthKey = toMonthKey(parsedDate)
+      totals[monthKey] = totals[monthKey] ?? {}
+      totals[monthKey][expense.normalized_merchant] =
+        (totals[monthKey][expense.normalized_merchant] ?? 0) + expense.amount
+
+      return totals
+    },
+    {}
+  )
+}
+
 function toSpendingTrendInsight(
   insight: SpendingTrendInsightWithDisplayRule
 ): SpendingTrendInsight {
   return {
     id: insight.id,
+    kind: insight.kind,
     category: insight.category,
+    merchant: insight.merchant,
+    normalized_merchant: insight.normalized_merchant,
     title: insight.title,
     detail: insight.detail,
     valueLabel: insight.valueLabel,
@@ -162,11 +196,16 @@ function formatInsightsForContext(
       return []
     }
 
+    const subject =
+      insight.kind === 'merchant' && insight.merchant
+        ? insight.merchant
+        : insight.category
+
     return [
       {
         ...toSpendingTrendInsight(insight),
         title: 'Higher holiday-period spend',
-        detail: `${insight.category} spending was higher recently (${holidayPeriod}).`,
+        detail: `${subject} spending was higher recently (${holidayPeriod}).`,
         valueLabel: formatCurrency(insight.displayRule.changeAmount),
       },
     ]
@@ -196,6 +235,7 @@ export function buildSpendingTrendInsights(
   }
 
   const insights: SpendingTrendInsightWithDisplayRule[] = []
+  const merchantDisplayLookup = buildMerchantDisplayLookup(datedExpenses)
   const last30DayStart = new Date(today)
   last30DayStart.setDate(today.getDate() - 30)
 
@@ -217,9 +257,40 @@ export function buildSpendingTrendInsights(
   recentCategoryTotals.forEach(([category, total]) => {
     insights.push({
       id: `top-recent-category:${category}`,
+      kind: 'category',
       category,
+      merchant: null,
+      normalized_merchant: null,
       title: 'Highest recent spend',
       detail: `${category} is a top category over the last 30 days.`,
+      valueLabel: formatCurrency(total),
+    })
+  })
+
+  const last30DayMerchantTotals = groupAmountsByNormalizedMerchant(
+    datedExpenses.filter(
+      (expense) =>
+        expense.parsedDate >= last30DayStart && expense.parsedDate <= today
+    )
+  )
+  const recentMerchantTotals = Object.entries(last30DayMerchantTotals).sort(
+    (a, b) => b[1] - a[1]
+  )
+
+  recentMerchantTotals.forEach(([normalized_merchant, total]) => {
+    const merchant = resolveMerchantDisplay(
+      merchantDisplayLookup,
+      normalized_merchant
+    )
+
+    insights.push({
+      id: `top-recent-merchant:${normalized_merchant}`,
+      kind: 'merchant',
+      category: '',
+      merchant,
+      normalized_merchant,
+      title: 'Highest recent merchant spend',
+      detail: `${merchant} is a top merchant over the last 30 days.`,
       valueLabel: formatCurrency(total),
     })
   })
@@ -241,9 +312,51 @@ export function buildSpendingTrendInsights(
   monthlyIncreases.forEach((increase) => {
     insights.push({
       id: `biggest-monthly-increase:${increase.category}`,
+      kind: 'category',
       category: increase.category,
+      merchant: null,
+      normalized_merchant: null,
       title: 'Biggest monthly increase',
       detail: `${increase.category} is up compared with last month.`,
+      valueLabel: `+${formatCurrency(increase.increase)}`,
+      displayRule: {
+        type: 'monthlyIncrease',
+        changeAmount: increase.increase,
+        changeRatio:
+          increase.previousTotal > 0
+            ? increase.increase / increase.previousTotal
+            : null,
+      },
+    })
+  })
+
+  const monthlyMerchantTotals = getMonthlyMerchantTotals(datedExpenses)
+  const currentMonthMerchantTotals = monthlyMerchantTotals[currentMonthKey] ?? {}
+  const previousMonthMerchantTotals =
+    monthlyMerchantTotals[previousMonthKey] ?? {}
+  const monthlyMerchantIncreases = Object.entries(currentMonthMerchantTotals)
+    .map(([normalized_merchant, total]) => ({
+      normalized_merchant,
+      previousTotal: previousMonthMerchantTotals[normalized_merchant] ?? 0,
+      increase: total - (previousMonthMerchantTotals[normalized_merchant] ?? 0),
+    }))
+    .filter((item) => item.increase > 0)
+    .sort((a, b) => b.increase - a.increase)
+
+  monthlyMerchantIncreases.forEach((increase) => {
+    const merchant = resolveMerchantDisplay(
+      merchantDisplayLookup,
+      increase.normalized_merchant
+    )
+
+    insights.push({
+      id: `biggest-monthly-merchant-increase:${increase.normalized_merchant}`,
+      kind: 'merchant',
+      category: '',
+      merchant,
+      normalized_merchant: increase.normalized_merchant,
+      title: 'Biggest monthly merchant increase',
+      detail: `${merchant} is up compared with last month.`,
       valueLabel: `+${formatCurrency(increase.increase)}`,
       displayRule: {
         type: 'monthlyIncrease',
@@ -283,10 +396,62 @@ export function buildSpendingTrendInsights(
   if (frequentCategory) {
     insights.push({
       id: 'frequent-category',
+      kind: 'category',
       category: frequentCategory.category,
+      merchant: null,
+      normalized_merchant: null,
       title: 'Most regular category',
       detail: `${frequentCategory.category} appears most consistently in your history.`,
       valueLabel: `${frequentCategory.count} entries`,
+    })
+  }
+
+  const merchantDates = datedExpenses.reduce<Record<string, Date[]>>(
+    (dates, expense) => {
+      if (!expense.normalized_merchant) {
+        return dates
+      }
+
+      dates[expense.normalized_merchant] = [
+        ...(dates[expense.normalized_merchant] ?? []),
+        expense.parsedDate,
+      ]
+      return dates
+    },
+    {}
+  )
+  const frequentMerchant = Object.entries(merchantDates)
+    .map(([normalized_merchant, dates]) => {
+      const sortedDates = [...dates].sort((a, b) => a.getTime() - b.getTime())
+      const firstDate = sortedDates[0]
+      const lastDate = sortedDates.at(-1)
+      const activeDays =
+        firstDate && lastDate ? Math.max(daysBetween(firstDate, lastDate), 1) : 1
+
+      return {
+        normalized_merchant,
+        count: dates.length,
+        averageDaysBetween: activeDays / Math.max(dates.length - 1, 1),
+      }
+    })
+    .filter((item) => item.count >= 3)
+    .sort((a, b) => a.averageDaysBetween - b.averageDaysBetween)[0]
+
+  if (frequentMerchant) {
+    const merchant = resolveMerchantDisplay(
+      merchantDisplayLookup,
+      frequentMerchant.normalized_merchant
+    )
+
+    insights.push({
+      id: 'frequent-merchant',
+      kind: 'merchant',
+      category: '',
+      merchant,
+      normalized_merchant: frequentMerchant.normalized_merchant,
+      title: 'Most regular merchant',
+      detail: `${merchant} appears most consistently in your history.`,
+      valueLabel: `${frequentMerchant.count} entries`,
     })
   }
 

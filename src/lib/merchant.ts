@@ -5,6 +5,57 @@ export function formatMerchantDisplay(
   return merchant?.trim() ?? ''
 }
 
+type MerchantLabelExpense = {
+  merchant: string | null
+  normalized_merchant: string | null
+  expense_date: string
+}
+
+/** Most recent raw `merchant` label per `normalized_merchant` (for UI only). */
+export function buildMerchantDisplayLookup<T extends MerchantLabelExpense>(
+  expenses: T[]
+) {
+  const latestByNormalized = new Map<
+    string,
+    { merchant: string; expense_date: string }
+  >()
+
+  for (const expense of expenses) {
+    if (!expense.normalized_merchant) {
+      continue
+    }
+
+    const merchant = formatMerchantDisplay(expense.merchant)
+
+    if (!merchant) {
+      continue
+    }
+
+    const existing = latestByNormalized.get(expense.normalized_merchant)
+
+    if (!existing || expense.expense_date > existing.expense_date) {
+      latestByNormalized.set(expense.normalized_merchant, {
+        merchant,
+        expense_date: expense.expense_date,
+      })
+    }
+  }
+
+  return Object.fromEntries(
+    [...latestByNormalized.entries()].map(([normalized, value]) => [
+      normalized,
+      value.merchant,
+    ])
+  )
+}
+
+export function resolveMerchantDisplay(
+  lookup: Record<string, string>,
+  normalized_merchant: string
+) {
+  return lookup[normalized_merchant] ?? normalized_merchant
+}
+
 const duplicateWindowMs = 2 * 60 * 1000
 
 export function isDuplicateExpense(
