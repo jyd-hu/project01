@@ -99,6 +99,30 @@ export function isDuplicateExpense(
   })
 }
 
+export function buildMerchantCategoriesLookup<
+  T extends { normalized_merchant: string | null; category: string },
+>(expenses: T[]) {
+  const categoriesByMerchant = new Map<string, Set<string>>()
+
+  for (const expense of expenses) {
+    if (!expense.normalized_merchant) {
+      continue
+    }
+
+    const categories =
+      categoriesByMerchant.get(expense.normalized_merchant) ?? new Set()
+    categories.add(expense.category)
+    categoriesByMerchant.set(expense.normalized_merchant, categories)
+  }
+
+  return Object.fromEntries(
+    [...categoriesByMerchant.entries()].map(([merchant, categories]) => [
+      merchant,
+      [...categories],
+    ])
+  )
+}
+
 export function groupAmountsByNormalizedMerchant<
   T extends { amount: number; normalized_merchant: string | null },
 >(expenses: T[]) {

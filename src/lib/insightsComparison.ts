@@ -1,40 +1,28 @@
-import {
-  buildMerchantDisplayLookup,
-  resolveMerchantDisplay,
-} from '@/lib/merchant'
+import type { InsightsExpense } from '@/lib/insightsTypes'
 
-export type DriverExpense = {
-  amount: number
-  category: string
-  expense_date: string
-  merchant: string | null
-  normalized_merchant: string | null
+export type MonthOverMonthDriver = {
+  change_pct: number | null
+  contribution: number | null
 }
 
-export type SpendingDriver = {
-  /** UI label (category name or raw merchant). */
+export type MonthOverMonthCategoryDriver = MonthOverMonthDriver & {
   name: string
-  normalized_merchant: string | null
-  currentTotal: number
-  previousTotal: number
-  change: number
-  percentChange: number | null
-  contributionToTotalChange: number | null
 }
 
-export type SpendingDriverAnalytics = {
+export type MonthOverMonthMerchantDriver = MonthOverMonthDriver & {
+  normalized_merchant: string
+}
+
+export type MonthOverMonthComparison = {
   period: {
-    currentMonth: string
-    previousMonth: string
+    current_month: string
+    previous_month: string
   }
-  totals: {
-    current: number
-    previous: number
-    change: number
-    percentChange: number | null
+  total_change_pct: number | null
+  drivers: {
+    categories: MonthOverMonthCategoryDriver[]
+    merchants: MonthOverMonthMerchantDriver[]
   }
-  categoryDrivers: SpendingDriver[]
-  merchantDrivers: SpendingDriver[]
 }
 
 const minDrivers = 2
@@ -67,9 +55,9 @@ function roundPercent(value: number) {
 }
 
 function getMonthTotals(
-  expenses: DriverExpense[],
+  expenses: InsightsExpense[],
   monthKey: string,
-  getKey: (expense: DriverExpense) => string | null
+  getKey: (expense: InsightsExpense) => string | null
 ) {
   return expenses.reduce<Record<string, number>>((totals, expense) => {
     const parsedDate = parseExpenseDate(expense.expense_date)
@@ -93,12 +81,18 @@ function sumTotals(totals: Record<string, number>) {
   return Object.values(totals).reduce((sum, total) => sum + total, 0)
 }
 
-function pickTopDrivers(
+type ChangeDriverCandidate = {
+  key: string
+  change: number
+  change_pct: number | null
+  contribution: number | null
+}
+
+function pickTopChangeDrivers(
   currentTotals: Record<string, number>,
   previousTotals: Record<string, number>,
-  totalChange: number,
-  resolveDisplayName?: (key: string) => string
-): SpendingDriver[] {
+  totalChange: number
+): ChangeDriverCandidate[] {
   if (totalChange === 0) {
     return []
   }
@@ -109,25 +103,22 @@ function pickTopDrivers(
   ])
 
   const drivers = [...keys]
-    .map((name) => {
-      const currentTotal = roundCurrency(currentTotals[name] ?? 0)
-      const previousTotal = roundCurrency(previousTotals[name] ?? 0)
+    .map((key) => {
+      const currentTotal = roundCurrency(currentTotals[key] ?? 0)
+      const previousTotal = roundCurrency(previousTotals[key] ?? 0)
       const change = roundCurrency(currentTotal - previousTotal)
 
       return {
-        name: resolveDisplayName ? resolveDisplayName(name) : name,
-        normalized_merchant: resolveDisplayName ? name : null,
-        currentTotal,
-        previousTotal,
-        change,
-        percentChange:
+        key,
+        change_pct:
           previousTotal > 0
             ? roundPercent((change / previousTotal) * 100)
             : null,
-        contributionToTotalChange:
+        contribution:
           totalChange !== 0
             ? roundPercent((change / totalChange) * 100)
             : null,
+        change,
       }
     })
     .filter(
@@ -145,11 +136,11 @@ function pickTopDrivers(
   return drivers.slice(0, count)
 }
 
-export function computeSpendingDrivers(
-  expenses: DriverExpense[],
+/** Optional calendar month-over-month comparison (not part of core insights). */
+export function computeMonthOverMonthComparison(
+  expenses: InsightsExpense[],
   today = new Date()
-): SpendingDriverAnalytics {
-  const merchantDisplayLookup = buildMerchantDisplayLookup(expenses)
+): MonthOverMonthComparison {
   const currentMonthKey = toMonthKey(today)
   const previousMonthKey = toMonthKey(addMonths(today, -1))
 
@@ -166,43 +157,49 @@ export function computeSpendingDrivers(
   const currentMerchantTotals = getMonthTotals(
     expenses,
     currentMonthKey,
-    (expense) => expense.normalized_merchant ?? null
+    (expense) => expense.normalized_merchant
   )
   const previousMerchantTotals = getMonthTotals(
     expenses,
     previousMonthKey,
-    (expense) => expense.normalized_merchant ?? null
+    (expense) => expense.normalized_merchant
   )
 
   const currentTotal = roundCurrency(sumTotals(currentCategoryTotals))
   const previousTotal = roundCurrency(sumTotals(previousCategoryTotals))
   const totalChange = roundCurrency(currentTotal - previousTotal)
 
+  const categoryChangeDrivers = pickTopChangeDrivers(
+    currentCategoryTotals,
+    previousCategoryTotals,
+    totalChange
+  )
+  const merchantChangeDrivers = pickTopChangeDrivers(
+    currentMerchantTotals,
+    previousMerchantTotals,
+    totalChange
+  )
+
   return {
     period: {
-      currentMonth: currentMonthKey,
-      previousMonth: previousMonthKey,
+      current_month: currentMonthKey,
+      previous_month: previousMonthKey,
     },
-    totals: {
-      current: currentTotal,
-      previous: previousTotal,
-      change: totalChange,
-      percentChange:
-        previousTotal > 0
-          ? roundPercent((totalChange / previousTotal) * 100)
-          : null,
+    total_change_pct:
+      previousTotal > 0
+        ? roundPercent((totalChange / previousTotal) * 100)
+        : null,
+    drivers: {
+      categories: categoryChangeDrivers.map((driver) => ({
+        name: driver.key,
+        change_pct: driver.change_pct,
+        contribution: driver.contribution,
+      })),
+      merchants: merchantChangeDrivers.map((driver) => ({
+        normalized_merchant: driver.key,
+        change_pct: driver.change_pct,
+        contribution: driver.contribution,
+      })),
     },
-    categoryDrivers: pickTopDrivers(
-      currentCategoryTotals,
-      previousCategoryTotals,
-      totalChange
-    ),
-    merchantDrivers: pickTopDrivers(
-      currentMerchantTotals,
-      previousMerchantTotals,
-      totalChange,
-      (normalized_merchant) =>
-        resolveMerchantDisplay(merchantDisplayLookup, normalized_merchant)
-    ),
   }
 }

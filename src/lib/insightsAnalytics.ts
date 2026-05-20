@@ -1,56 +1,40 @@
-import {
-  buildMerchantDisplayLookup,
-  groupAmountsByNormalizedMerchant,
-  resolveMerchantDisplay,
-} from '@/lib/merchant'
-import {
-  buildSpendingTrendInsights,
-  type SpendingTrendResult,
-  type TrendExpense,
-} from '@/lib/spendingTrends'
-import {
-  computeSpendingDrivers,
-  type SpendingDriver,
-  type SpendingDriverAnalytics,
-} from '@/lib/spendingDrivers'
+import { getInsightsPeriodBounds } from '@/lib/insightsDates'
+import type { InsightsExpense } from '@/lib/insightsTypes'
 
-export type InsightsExpense = TrendExpense
-
-export type InsightsAnalytics = {
-  generatedAt: string
-  period: {
-    days: number
-    startDate: string
-    endDate: string
-  }
-  summary: {
-    totalSpend: number
-    transactionCount: number
-    averageTransaction: number
-  }
-  topCategories: Array<{
-    category: string
-    total: number
-    shareOfSpend: number
-  }>
-  topMerchants: Array<{
-    normalized_merchant: string
-    merchant: string
-    total: number
-    shareOfSpend: number
-  }>
-  monthlyTotals: Array<{
-    month: string
-    total: number
-  }>
-  driverPeriod: SpendingDriverAnalytics['period']
-  driverTotals: SpendingDriverAnalytics['totals']
-  categoryDrivers: SpendingDriver[]
-  merchantDrivers: SpendingDriver[]
-  trends: SpendingTrendResult
+export type InsightsCategoryDriver = {
+  name: string
+  spend: number
+  contribution: number
 }
 
-const defaultLookbackDays = 90
+export type InsightsMerchantDriver = {
+  normalized_merchant: string
+  spend: number
+  contribution: number
+}
+
+export type InsightsCoreResponse = {
+  period: {
+    startDate: string
+    endDate: string
+    days: number
+  }
+  totals: {
+    spend: number
+    transaction_count: number
+  }
+  drivers: {
+    categories: InsightsCategoryDriver[]
+    merchants: InsightsMerchantDriver[]
+  }
+  patterns: {
+    monthly_totals: Record<string, number>
+    day_of_week_totals: Record<string, number>
+  }
+}
+
+const defaultLookbackDays = 30
+const maxDrivers = 5
 
 function parseExpenseDate(date: string) {
   const [year, month, day] = date.split('-').map(Number)
@@ -62,118 +46,121 @@ function parseExpenseDate(date: string) {
   return new Date(year, month - 1, day)
 }
 
-function toDateString(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+function roundCurrency(amount: number) {
+  return Math.round(amount * 100) / 100
+}
+
+function roundPercent(value: number) {
+  return Math.round(value * 10) / 10
 }
 
 function toMonthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-function getPeriodStart(today: Date, days: number) {
-  const start = new Date(today)
-  start.setDate(today.getDate() - days)
-  return start
+function sumByKey(
+  expenses: InsightsExpense[],
+  getKey: (expense: InsightsExpense) => string | null
+) {
+  return expenses.reduce<Record<string, number>>((totals, expense) => {
+    const key = getKey(expense)
+
+    if (!key) {
+      return totals
+    }
+
+    totals[key] = roundCurrency((totals[key] ?? 0) + expense.amount)
+    return totals
+  }, {})
 }
 
-function roundCurrency(amount: number) {
-  return Math.round(amount * 100) / 100
+function topContributionDrivers<T>(
+  totals: Record<string, number>,
+  totalSpend: number,
+  toDriver: (key: string, spend: number, contribution: number) => T
+): T[] {
+  return Object.entries(totals)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, maxDrivers)
+    .map(([key, spend]) => {
+      const contribution =
+        totalSpend > 0 ? roundPercent((spend / totalSpend) * 100) : 0
+
+      return toDriver(key, spend, contribution)
+    })
 }
 
+function buildTimePatterns(expenses: InsightsExpense[]) {
+  const monthly_totals: Record<string, number> = {}
+  const day_of_week_totals: Record<string, number> = {}
+
+  for (const expense of expenses) {
+    const parsedDate = parseExpenseDate(expense.expense_date)
+
+    if (!parsedDate) {
+      continue
+    }
+
+    const monthKey = toMonthKey(parsedDate)
+    monthly_totals[monthKey] = roundCurrency(
+      (monthly_totals[monthKey] ?? 0) + expense.amount
+    )
+
+    const dayKey = String(parsedDate.getDay())
+    day_of_week_totals[dayKey] = roundCurrency(
+      (day_of_week_totals[dayKey] ?? 0) + expense.amount
+    )
+  }
+
+  return { monthly_totals, day_of_week_totals }
+}
+
+/** Single source of truth for core period insights (no month-over-month). */
 export function computeInsightsAnalytics(
   expenses: InsightsExpense[],
   options?: { days?: number; today?: Date }
-): InsightsAnalytics {
+): InsightsCoreResponse {
   const days = options?.days ?? defaultLookbackDays
   const today = options?.today ?? new Date()
-  const periodStart = getPeriodStart(today, days)
-  const startDate = toDateString(periodStart)
-  const endDate = toDateString(today)
+  const period = getInsightsPeriodBounds(days, today)
 
-  const inPeriod = expenses.filter((expense) => {
-    const parsedDate = parseExpenseDate(expense.expense_date)
-    return parsedDate && parsedDate >= periodStart && parsedDate <= today
-  })
-
-  const totalSpend = roundCurrency(
-    inPeriod.reduce((sum, expense) => sum + expense.amount, 0)
-  )
-  const transactionCount = inPeriod.length
-  const averageTransaction =
-    transactionCount > 0 ? roundCurrency(totalSpend / transactionCount) : 0
-
-  const categoryTotals = inPeriod.reduce<Record<string, number>>(
-    (totals, expense) => {
-      totals[expense.category] = (totals[expense.category] ?? 0) + expense.amount
-      return totals
-    },
-    {}
+  const periodExpenses = expenses.filter(
+    (expense) =>
+      expense.expense_date >= period.startDate &&
+      expense.expense_date <= period.endDate
   )
 
-  const topCategories = Object.entries(categoryTotals)
-    .map(([category, total]) => ({
-      category,
-      total: roundCurrency(total),
-      shareOfSpend:
-        totalSpend > 0 ? roundCurrency((total / totalSpend) * 100) : 0,
-    }))
-    .sort((a, b) => b.total - a.total)
+  const spend = roundCurrency(
+    periodExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+  )
+  const transaction_count = periodExpenses.length
 
-  const merchantDisplayLookup = buildMerchantDisplayLookup(expenses)
-  const merchantTotals = groupAmountsByNormalizedMerchant(inPeriod)
-  const topMerchants = Object.entries(merchantTotals)
-    .map(([normalized_merchant, total]) => ({
+  const categoryTotals = sumByKey(periodExpenses, (expense) => expense.category)
+  const merchantTotals = sumByKey(
+    periodExpenses,
+    (expense) => expense.normalized_merchant
+  )
+
+  const categories = topContributionDrivers(
+    categoryTotals,
+    spend,
+    (name, amount, contribution) => ({ name, spend: amount, contribution })
+  )
+
+  const merchants = topContributionDrivers(
+    merchantTotals,
+    spend,
+    (normalized_merchant, amount, contribution) => ({
       normalized_merchant,
-      merchant: resolveMerchantDisplay(merchantDisplayLookup, normalized_merchant),
-      total: roundCurrency(total),
-      shareOfSpend:
-        totalSpend > 0 ? roundCurrency((total / totalSpend) * 100) : 0,
-    }))
-    .sort((a, b) => b.total - a.total)
-
-  const monthlyTotals = inPeriod
-    .reduce<Record<string, number>>((totals, expense) => {
-      const parsedDate = parseExpenseDate(expense.expense_date)
-
-      if (!parsedDate) {
-        return totals
-      }
-
-      const monthKey = toMonthKey(parsedDate)
-      totals[monthKey] = (totals[monthKey] ?? 0) + expense.amount
-      return totals
-    }, {})
-  const monthlyTotalsList = Object.entries(monthlyTotals)
-    .map(([month, total]) => ({
-      month,
-      total: roundCurrency(total),
-    }))
-    .sort((a, b) => a.month.localeCompare(b.month))
-
-  const driverAnalytics = computeSpendingDrivers(expenses, today)
+      spend: amount,
+      contribution,
+    })
+  )
 
   return {
-    generatedAt: today.toISOString(),
-    period: { days, startDate, endDate },
-    summary: {
-      totalSpend,
-      transactionCount,
-      averageTransaction,
-    },
-    topCategories,
-    topMerchants,
-    monthlyTotals: monthlyTotalsList,
-    driverPeriod: driverAnalytics.period,
-    driverTotals: driverAnalytics.totals,
-    categoryDrivers: driverAnalytics.categoryDrivers,
-    merchantDrivers: driverAnalytics.merchantDrivers,
-    trends: buildSpendingTrendInsights(inPeriod, today),
+    period,
+    totals: { spend, transaction_count },
+    drivers: { categories, merchants },
+    patterns: buildTimePatterns(periodExpenses),
   }
-}
-
-export function getInsightsLookbackStartDate(days: number, today = new Date()) {
-  return toDateString(getPeriodStart(today, days))
 }

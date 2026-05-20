@@ -17,6 +17,7 @@ import {
   buildSpendingTrendInsights,
   type TrendExpense,
 } from '@/lib/spendingTrends'
+import { buildMerchantCategoriesLookup } from '@/lib/merchant'
 import { supabase } from '@/lib/supabase'
 
 type Category = {
@@ -59,7 +60,7 @@ function getPreferenceLabel(preference: AnalysisPreference | null) {
     )
   }
 
-  return 'Selected categories'
+  return 'Custom'
 }
 
 export default function AnalysisPage() {
@@ -228,6 +229,10 @@ export default function AnalysisPage() {
     ),
   }))
   const draftPreference = getDraftPreference()
+  const merchantCategories = useMemo(
+    () => buildMerchantCategoriesLookup(expenses),
+    [expenses]
+  )
   const trendResult = useMemo(
     () => buildSpendingTrendInsights(expenses),
     [expenses]
@@ -239,9 +244,10 @@ export default function AnalysisPage() {
       filterInsightsByPreference(
         trendInsights,
         analysisCategories,
-        draftPreference
+        draftPreference,
+        merchantCategories
       ),
-    [analysisCategories, draftPreference, trendInsights]
+    [analysisCategories, draftPreference, merchantCategories, trendInsights]
   )
   const selectedPresetId =
     draftPreference?.type === 'preset' ? draftPreference.presetId : null
@@ -314,7 +320,7 @@ export default function AnalysisPage() {
                 {preset.label} ({preset.description})
               </option>
             ))}
-            <option value="categories">Selected categories</option>
+            <option value="categories">Custom</option>
           </select>
         </label>
 

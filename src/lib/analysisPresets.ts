@@ -14,6 +14,7 @@ export type AnalysisCategory =
 export type TrendInsightWithCategory = {
   kind?: 'category' | 'merchant'
   category: string
+  normalized_merchant?: string | null
   title: string
 }
 
@@ -138,16 +139,30 @@ export function getSelectedInsightCategories(
   )
 }
 
+function insightMatchesPreference<T extends TrendInsightWithCategory>(
+  insight: T,
+  selectedCategories: Set<string>,
+  merchantCategories?: Record<string, string[]>
+) {
+  if (insight.kind === 'merchant' && insight.normalized_merchant) {
+    const categories =
+      merchantCategories?.[insight.normalized_merchant] ?? []
+    return categories.some((category) => selectedCategories.has(category))
+  }
+
+  return selectedCategories.has(insight.category)
+}
+
 export function filterInsightsByPreference<T extends TrendInsightWithCategory>(
   insights: T[],
   categories: AnalysisCategory[],
-  preference: AnalysisPreference | null
+  preference: AnalysisPreference | null,
+  merchantCategories?: Record<string, string[]>
 ) {
   const selectedCategories = getSelectedInsightCategories(categories, preference)
   const filteredInsights = selectedCategories
-    ? insights.filter(
-        (insight) =>
-          insight.kind === 'merchant' || selectedCategories.has(insight.category)
+    ? insights.filter((insight) =>
+        insightMatchesPreference(insight, selectedCategories, merchantCategories)
       )
     : insights
 
