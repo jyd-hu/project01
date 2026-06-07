@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   startTransition,
@@ -172,6 +173,38 @@ function orderCategories(categories: Category[]) {
         display_order: index + 1,
       }))
   )
+}
+
+function getTopCategoriesByFrequency(
+  expenses: Expense[],
+  categories: Category[],
+  limit: number
+) {
+  const counts = new Map<string, number>()
+
+  for (const expense of expenses) {
+    counts.set(expense.category, (counts.get(expense.category) ?? 0) + 1)
+  }
+
+  return [...categories]
+    .sort((a, b) => {
+      const countDiff = (counts.get(b.name) ?? 0) - (counts.get(a.name) ?? 0)
+
+      if (countDiff !== 0) {
+        return countDiff
+      }
+
+      if (a.category_group !== b.category_group) {
+        return a.category_group === 'essential' ? -1 : 1
+      }
+
+      if (a.display_order !== b.display_order) {
+        return a.display_order - b.display_order
+      }
+
+      return a.id - b.id
+    })
+    .slice(0, limit)
 }
 
 function reorderCategories(
@@ -903,6 +936,22 @@ export default function Home() {
     categoriesRef.current = categories
   }, [categories])
 
+  const topCategories = useMemo(
+    () => getTopCategoriesByFrequency(expenses, categories, 3),
+    [expenses, categories]
+  )
+  const topCategoryIdSet = useMemo(
+    () => new Set(topCategories.map((category) => String(category.id))),
+    [topCategories]
+  )
+  const otherCategories = useMemo(
+    () =>
+      categories.filter(
+        (category) => !topCategoryIdSet.has(String(category.id))
+      ),
+    [categories, topCategoryIdSet]
+  )
+
   async function signOut() {
     await supabase.auth.signOut()
     router.replace('/login')
@@ -959,18 +1008,27 @@ export default function Home() {
       (category) => category.category_group === group.value
     ),
   }))
-  const renderCategoryOptions = () =>
-    groupedCategorySections.map((group) =>
-      group.categories.length ? (
+  const isOtherCategorySelected =
+    categoryId !== '' && !topCategoryIdSet.has(categoryId)
+  const renderCategoryOptions = (categoryList: Category[] = categories) => {
+    const categoryIds = new Set(categoryList.map((category) => category.id))
+
+    return groupedCategorySections.map((group) => {
+      const groupCategories = group.categories.filter((category) =>
+        categoryIds.has(category.id)
+      )
+
+      return groupCategories.length ? (
         <optgroup key={group.value} label={group.label}>
-          {group.categories.map((category) => (
+          {groupCategories.map((category) => (
             <option key={category.id} value={category.id}>
               {category.name}
             </option>
           ))}
         </optgroup>
       ) : null
-    )
+    })
+  }
   const signedInEmail = user?.email ?? session.user.email
 
   return (
@@ -1222,14 +1280,41 @@ export default function Home() {
           onChange={(e) => setMerchant(e.target.value)}
         />
 
-        <select
-          className={inputClass}
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-        >
-          <option value="">Select category</option>
-          {renderCategoryOptions()}
-        </select>
+        <div className="space-y-2">
+          {topCategories.length > 0 ? (
+            <div className="flex gap-2">
+              {topCategories.map((category) => {
+                const id = String(category.id)
+                const selected = categoryId === id
+
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setCategoryId(id)}
+                    className={`flex-1 rounded border p-2 text-sm ${
+                      selected
+                        ? 'border-black bg-black text-white'
+                        : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
+                    }`}
+                  >
+                    {category.name}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+          {otherCategories.length > 0 ? (
+            <select
+              className={inputClass}
+              value={isOtherCategorySelected ? categoryId : ''}
+              onChange={(e) => setCategoryId(e.target.value)}
+            >
+              <option value="">Other category</option>
+              {renderCategoryOptions(otherCategories)}
+            </select>
+          ) : null}
+        </div>
 
         <input
           className={inputClass}
