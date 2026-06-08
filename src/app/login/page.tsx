@@ -16,6 +16,31 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [userCount, setUserCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+
+    async function loadUserCount() {
+      try {
+        const response = await fetch('/api/users/count')
+        if (!response.ok || !mounted) return
+
+        const payload = (await response.json()) as { count: number | null }
+        if (mounted && typeof payload.count === 'number') {
+          setUserCount(payload.count)
+        }
+      } catch {
+        // Omit count if unavailable.
+      }
+    }
+
+    void loadUserCount()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -88,7 +113,12 @@ export default function LoginPage() {
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-4">
       <section className="space-y-4 rounded-xl bg-gray-100 p-4 text-gray-900">
         <div>
-          <h1 className="text-2xl font-semibold">AI Financial Coach</h1>
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-2xl font-semibold">AI Financial Coach</h1>
+            <span className="shrink-0 rounded bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+              dev
+            </span>
+          </div>
           <p className="text-sm text-gray-600">
             Helping young professionals build smarter money habits.
           </p>
@@ -134,18 +164,39 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <button
-          type="button"
-          onClick={() => {
-            setMode(isSignup ? 'login' : 'signup')
-            setMessage(null)
-          }}
-          className="text-sm font-medium text-blue-600 hover:text-blue-700"
-        >
-          {isSignup
-            ? 'Already have an account? Log in'
-            : 'Need an account? Sign up'}
-        </button>
+        {isSignup ? (
+          <button
+            type="button"
+            onClick={() => {
+              setMode('login')
+              setMessage(null)
+            }}
+            className="text-sm font-medium text-blue-600 hover:text-blue-700"
+          >
+            Already have an account? Log in
+          </button>
+        ) : (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            {userCount !== null ? (
+              <span className="text-gray-600">
+                {userCount.toLocaleString()}{' '}
+                {userCount === 1 ? 'user' : 'users'} registered
+              </span>
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setMode('signup')
+                setMessage(null)
+              }}
+              className="font-medium text-blue-600 hover:text-blue-700"
+            >
+              Sign up
+            </button>
+          </div>
+        )}
       </section>
     </main>
   )
