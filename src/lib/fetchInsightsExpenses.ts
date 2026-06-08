@@ -16,7 +16,7 @@ export async function fetchInsightsExpenses(
 ) {
   const { data, error } = await supabase
     .from('expenses')
-    .select('amount, normalized_merchant, category, expense_date')
+    .select('amount, normalized_merchant, category, expense_date, note')
     .gte('expense_date', startDate)
     .lte('expense_date', endDate)
     .order('expense_date', { ascending: false })

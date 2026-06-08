@@ -24,6 +24,21 @@ export function getInsightsPeriodBounds(days: number, today = new Date()) {
   }
 }
 
+/** Same-length window immediately before the current insights period. */
+export function getPreviousPeriodBounds(days: number, today = new Date()) {
+  const currentStart = getPeriodStart(today, days)
+  const previousEnd = new Date(currentStart)
+  previousEnd.setDate(previousEnd.getDate() - 1)
+  const previousStart = new Date(previousEnd)
+  previousStart.setDate(previousStart.getDate() - days + 1)
+
+  return {
+    startDate: toDateString(previousStart),
+    endDate: toDateString(previousEnd),
+    days,
+  }
+}
+
 /** Earliest fetch date when optional month-over-month comparison is requested. */
 export function getComparisonFetchStartDate(days: number, today = new Date()) {
   const periodStart = getPeriodStart(today, days)
@@ -35,4 +50,12 @@ export function getComparisonFetchStartDate(days: number, today = new Date()) {
       : previousMonthStart
 
   return toDateString(fetchStart)
+}
+
+/** Earliest fetch date for period-over-period extended analytics. */
+export function getExtendedFetchStartDate(days: number, today = new Date()) {
+  const { startDate: previousStartDate } = getPreviousPeriodBounds(days, today)
+  const currentStartDate = getInsightsPeriodBounds(days, today).startDate
+
+  return previousStartDate < currentStartDate ? previousStartDate : currentStartDate
 }

@@ -4,4 +4,6 @@ export type InsightsExpense = {
   category: string
   expense_date: string
   normalized_merchant: string | null
+  /** Used only for deterministic keyword themes; never sent to OpenAI verbatim. */
+  note?: string | null
 }

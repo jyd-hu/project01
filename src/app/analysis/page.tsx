@@ -287,6 +287,12 @@ export default function AnalysisPage() {
           </svg>
         </Link>
         <h1 className="text-xl font-semibold">Analysis</h1>
+        <Link
+          href="/analysis/insights"
+          className="text-sm font-medium text-gray-600 underline"
+        >
+          Insights
+        </Link>
       </div>
 
       <section className="space-y-3 rounded-xl bg-gray-100 p-4 text-gray-900">
