@@ -1,5 +1,6 @@
 'use client'
 
+import { InsightsAnimatedGradient } from '@/components/InsightsAnimatedGradient'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { startTransition, useEffect, useMemo, useState } from 'react'
@@ -289,9 +290,30 @@ export default function AnalysisPage() {
         <h1 className="text-xl font-semibold">Analysis</h1>
         <Link
           href="/analysis/insights"
-          className="text-sm font-medium text-gray-600 underline"
+          className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+          aria-label="Insights"
         >
-          Insights
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <defs>
+              <InsightsAnimatedGradient id="insights-bulb-gradient" />
+            </defs>
+            <path
+              d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"
+              stroke="url(#insights-bulb-gradient)"
+            />
+            <path d="M9 18h6" stroke="url(#insights-bulb-gradient)" />
+            <path d="M10 22h4" stroke="url(#insights-bulb-gradient)" />
+          </svg>
         </Link>
       </div>
 

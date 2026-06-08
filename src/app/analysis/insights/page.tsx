@@ -1,5 +1,6 @@
 'use client'
 
+import { InsightsAnimatedGradient } from '@/components/InsightsAnimatedGradient'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { startTransition, useEffect, useState } from 'react'
@@ -204,61 +205,6 @@ export default function InsightsPage() {
         <span className="w-10" aria-hidden />
       </div>
 
-      <section className="space-y-3 rounded-xl bg-gray-100 p-4 text-gray-900">
-        <div>
-          <h2 className="text-lg font-semibold">Period overview</h2>
-          <p className="text-sm text-gray-500">
-            Deterministic analytics for the last {defaultDays} days.
-          </p>
-        </div>
-
-        {analyticsLoading ? (
-          <p className="text-sm text-gray-500">Loading analytics...</p>
-        ) : null}
-
-        {analyticsError ? (
-          <p className="text-sm text-red-600" role="alert">
-            {analyticsError}
-          </p>
-        ) : null}
-
-        {analytics ? (
-          <div className="space-y-2 text-sm">
-            <p>
-              <span className="font-medium">Total spend:</span>{' '}
-              {currencyFormatter.format(analytics.totals.spend)}
-            </p>
-            <p>
-              <span className="font-medium">Transactions:</span>{' '}
-              {analytics.totals.transaction_count}
-            </p>
-            <p>
-              <span className="font-medium">Vs previous period:</span>{' '}
-              {formatPct(analytics.period_comparison.spend_change_pct)} (
-              {currencyFormatter.format(
-                analytics.period_comparison.spend_change_amount
-              )}
-              )
-            </p>
-            <p>
-              <span className="font-medium">Avg transaction:</span>{' '}
-              {currencyFormatter.format(
-                analytics.period_comparison.avg_transaction_size
-              )}{' '}
-              ({formatPct(
-                analytics.period_comparison.avg_transaction_size_change_pct
-              )}
-              )
-            </p>
-            <p>
-              <span className="font-medium">Weekday vs weekend:</span>{' '}
-              {analytics.weekday_weekend.weekday_spend_pct}% weekday /{' '}
-              {analytics.weekday_weekend.weekend_spend_pct}% weekend
-            </p>
-          </div>
-        ) : null}
-      </section>
-
       <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 text-gray-900">
         <div>
           <h2 className="text-lg font-semibold">AI insight</h2>
@@ -272,9 +218,28 @@ export default function InsightsPage() {
             type="button"
             onClick={() => void generateAiInsight()}
             disabled={aiLoading || analyticsLoading}
-            className="w-full rounded bg-black p-2 text-white disabled:opacity-60"
+            className="relative w-full overflow-hidden rounded p-2 disabled:opacity-60"
           >
-            {aiLoading ? 'Generating...' : 'Generate AI insight'}
+            <svg
+              className="absolute inset-0 size-full"
+              preserveAspectRatio="none"
+              aria-hidden
+            >
+              <defs>
+                <InsightsAnimatedGradient
+                  id="insights-button-gradient"
+                  variant="fill"
+                />
+              </defs>
+              <rect
+                width="100%"
+                height="100%"
+                fill="url(#insights-button-gradient)"
+              />
+            </svg>
+            <span className="relative font-medium text-[#1e1b4b]">
+              {aiLoading ? 'Generating...' : 'Generate AI insight'}
+            </span>
           </button>
         ) : null}
 
@@ -370,6 +335,61 @@ export default function InsightsPage() {
               ) : null}
             </div>
           </article>
+        ) : null}
+      </section>
+
+      <section className="space-y-3 rounded-xl bg-gray-100 p-4 text-gray-900">
+        <div>
+          <h2 className="text-lg font-semibold">Period overview</h2>
+          <p className="text-sm text-gray-500">
+            Deterministic analytics for the last {defaultDays} days.
+          </p>
+        </div>
+
+        {analyticsLoading ? (
+          <p className="text-sm text-gray-500">Loading analytics...</p>
+        ) : null}
+
+        {analyticsError ? (
+          <p className="text-sm text-red-600" role="alert">
+            {analyticsError}
+          </p>
+        ) : null}
+
+        {analytics ? (
+          <div className="space-y-2 text-sm">
+            <p>
+              <span className="font-medium">Total spend:</span>{' '}
+              {currencyFormatter.format(analytics.totals.spend)}
+            </p>
+            <p>
+              <span className="font-medium">Transactions:</span>{' '}
+              {analytics.totals.transaction_count}
+            </p>
+            <p>
+              <span className="font-medium">Vs previous period:</span>{' '}
+              {formatPct(analytics.period_comparison.spend_change_pct)} (
+              {currencyFormatter.format(
+                analytics.period_comparison.spend_change_amount
+              )}
+              )
+            </p>
+            <p>
+              <span className="font-medium">Avg transaction:</span>{' '}
+              {currencyFormatter.format(
+                analytics.period_comparison.avg_transaction_size
+              )}{' '}
+              ({formatPct(
+                analytics.period_comparison.avg_transaction_size_change_pct
+              )}
+              )
+            </p>
+            <p>
+              <span className="font-medium">Weekday vs weekend:</span>{' '}
+              {analytics.weekday_weekend.weekday_spend_pct}% weekday /{' '}
+              {analytics.weekday_weekend.weekend_spend_pct}% weekend
+            </p>
+          </div>
         ) : null}
       </section>
     </main>
