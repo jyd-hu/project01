@@ -88,13 +88,9 @@ export default function LoginPage() {
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-4">
       <section className="space-y-4 rounded-xl bg-gray-100 p-4 text-gray-900">
         <div>
-          <h1 className="text-2xl font-semibold">
-            {isSignup ? 'Create account' : 'Log in'}
-          </h1>
+          <h1 className="text-2xl font-semibold">AI Financial Coach</h1>
           <p className="text-sm text-gray-600">
-            {isSignup
-              ? 'Sign up with your email and password.'
-              : 'Log in to manage your expenses.'}
+            Helping young professionals build smarter money habits.
           </p>
         </div>
 
