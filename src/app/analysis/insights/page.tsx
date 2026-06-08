@@ -91,6 +91,10 @@ export default function InsightsPage() {
 
     setAiLoading(false)
 
+    // #region agent log
+    fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'insights/page.tsx:generateAiInsight',message:'AI summary client response',data:{status:response.status,ok:response.ok,hasPayload:Boolean(payload),payloadKeys:payload&&typeof payload==='object'?Object.keys(payload):[],error:payload&&'error'in payload?(payload as {error?:string}).error:null,message:payload&&'message'in payload?(payload as {message?:string}).message:null,hasHeadline:Boolean(payload&&'headline'in payload)},timestamp:Date.now(),hypothesisId:'E',runId:'pre-fix'})}).catch(()=>{});
+    // #endregion
+
     if (!response.ok) {
       if (payload && 'message' in payload && payload.message) {
         setAiError(payload.message)
@@ -328,8 +332,13 @@ export default function InsightsPage() {
 
             <div className="flex items-center justify-between pt-1">
               <p className="text-xs text-gray-500">
-                {aiSummary.cached ? 'Loaded from cache' : 'Freshly generated'}
+                {aiSummary.cached
+                  ? 'Loaded from cache'
+                  : aiSummary.persisted === false
+                    ? 'Freshly generated (cache unavailable)'
+                    : 'Freshly generated'}
               </p>
+              {aiSummary.persisted !== false ? (
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -358,6 +367,7 @@ export default function InsightsPage() {
                   👎
                 </button>
               </div>
+              ) : null}
             </div>
           </article>
         ) : null}

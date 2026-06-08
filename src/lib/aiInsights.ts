@@ -70,6 +70,8 @@ export type AiInsightSummary = {
 export type AiInsightApiResponse = AiInsightSummary & {
   id: string
   cached: boolean
+  /** False when the summary was generated but not saved to Supabase cache. */
+  persisted?: boolean
 }
 
 const defaultModel = 'gpt-4o-mini'
@@ -314,6 +316,11 @@ export async function generateAiInsightSummary(
   })
 
   const content = response.choices[0]?.message?.content
+  const finishReason = response.choices[0]?.finish_reason ?? null
+
+  // #region agent log
+  fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'aiInsights.ts:openai_response',message:'OpenAI response received',data:{model,finishReason,hasContent:Boolean(content),contentLength:content?.length??0},timestamp:Date.now(),hypothesisId:'B',runId:'pre-fix'})}).catch(()=>{});
+  // #endregion
 
   if (!content) {
     throw new Error('OPENAI_EMPTY_RESPONSE')
@@ -330,6 +337,9 @@ export async function generateAiInsightSummary(
   const summary = parseAiInsightSummary(parsed)
 
   if (!summary) {
+    // #region agent log
+    fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'aiInsights.ts:invalid_shape',message:'parseAiInsightSummary returned null',data:{parsedKeys:parsed&&typeof parsed==='object'?Object.keys(parsed as object):[]},timestamp:Date.now(),hypothesisId:'B',runId:'pre-fix'})}).catch(()=>{});
+    // #endregion
     throw new Error('OPENAI_INVALID_SHAPE')
   }
 

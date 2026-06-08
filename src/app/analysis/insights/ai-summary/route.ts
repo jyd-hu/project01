@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import {
   buildCompactAiPayload,
@@ -36,9 +37,10 @@ function parseDaysParam(value: string | null) {
 function toApiResponse(
   id: string,
   summary: AiInsightSummary,
-  cached: boolean
+  cached: boolean,
+  persisted = true
 ): AiInsightApiResponse {
-  return { id, cached, ...summary }
+  return { id, cached, persisted, ...summary }
 }
 
 // AI summary route — only called when the user clicks "Generate AI insight".
@@ -88,6 +90,9 @@ export async function GET(request: Request) {
   }
 
   if (!isOpenAiConfigured()) {
+    // #region agent log
+    fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'ai-summary/route.ts:not_configured',message:'OpenAI not configured',data:{days},timestamp:Date.now(),hypothesisId:'C',runId:'pre-fix'})}).catch(()=>{});
+    // #endregion
     return NextResponse.json(
       {
         error: 'not_configured',
@@ -99,6 +104,9 @@ export async function GET(request: Request) {
 
   // Step 3: OpenAI generation — only on cache miss and when configured.
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'ai-summary/route.ts:generate_start',message:'Starting OpenAI generation',data:{days,inputHash,model:getOpenAiModel(),expenseCount:expenses.length},timestamp:Date.now(),hypothesisId:'A',runId:'pre-fix'})}).catch(()=>{});
+    // #endregion
     const summary = await generateAiInsightSummary(compactPayload)
     const stored = await storeAiSummary(supabase, {
       userId: user.id,
@@ -110,14 +118,21 @@ export async function GET(request: Request) {
     })
 
     if (!stored) {
+      // #region agent log
+      fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'ai-summary/route.ts:cache_write_degraded',message:'Returning summary without cache persist',data:{days,inputHash,headline:summary.headline},timestamp:Date.now(),hypothesisId:'D',runId:'post-fix'})}).catch(()=>{});
+      // #endregion
       return NextResponse.json(
-        { error: 'cache_write_failed', message: 'AI insight could not be saved.' },
-        { status: 500 }
+        toApiResponse(randomUUID(), summary, false, false)
       )
     }
 
     return NextResponse.json(toApiResponse(stored.id, stored.summary_json, false))
-  } catch {
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error)
+    const errName = error instanceof Error ? error.name : 'unknown'
+    // #region agent log
+    fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'ai-summary/route.ts:generation_failed',message:'Generation catch block',data:{errMsg,errName,days},timestamp:Date.now(),hypothesisId:'A',runId:'pre-fix'})}).catch(()=>{});
+    // #endregion
     return NextResponse.json(
       {
         error: 'generation_failed',

@@ -72,6 +72,9 @@ export async function storeAiSummary(
     .single()
 
   if (error || !data) {
+    // #region agent log
+    fetch('http://127.0.0.1:7649/ingest/7bbc1a3b-7dcb-4e4d-a24e-d27ff37bea30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ec4b9f'},body:JSON.stringify({sessionId:'ec4b9f',location:'aiInsightsCache.ts:storeAiSummary',message:'storeAiSummary failed',data:{errorCode:error?.code??null,errorMessage:error?.message??null,errorDetails:error?.details??null,hint:error?.hint??null,hasData:Boolean(data)},timestamp:Date.now(),hypothesisId:'D',runId:'pre-fix'})}).catch(()=>{});
+    // #endregion
     return null
   }
 
