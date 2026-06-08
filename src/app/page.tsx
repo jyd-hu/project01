@@ -11,6 +11,7 @@ import {
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Session, User } from '@supabase/supabase-js'
+import { DeleteAccountSection } from '@/components/DeleteAccountSection'
 import { isDuplicateExpense } from '@/lib/merchant'
 import { supabase } from '@/lib/supabase'
 
@@ -1261,6 +1262,7 @@ export default function Home() {
             >
               Sign out
             </button>
+            <DeleteAccountSection />
           </section>
         </>
       ) : (
