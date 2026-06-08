@@ -61,6 +61,18 @@ export async function POST(request: Request) {
     )
   }
 
+  const { error: insertError } = await admin
+    .from('account_deletion_feedback')
+    .insert({
+      user_id: user.id,
+      reason,
+      other_reason: reason === 'other' ? otherReason : null,
+    })
+
+  if (insertError) {
+    return NextResponse.json({ error: insertError.message }, { status: 500 })
+  }
+
   const { error: deleteError } = await admin.auth.admin.deleteUser(user.id)
 
   if (deleteError) {
